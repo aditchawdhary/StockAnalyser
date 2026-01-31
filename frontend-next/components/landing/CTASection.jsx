@@ -104,9 +104,9 @@ const CTASection = () => {
     function animate() {
       requestAnimationFrame(animate);
 
-      time += 0.003;
+      time += 0.1;
       helixGroup.rotation.y = time;
-      helixGroup.position.y = Math.sin(time * 0.5) * 0.3;
+      helixGroup.position.y = Math.sin(time * 0.4) * 0.3;
 
       renderer.render(scene, camera);
     }
