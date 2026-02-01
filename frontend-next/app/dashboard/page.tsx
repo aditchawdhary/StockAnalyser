@@ -172,11 +172,11 @@ export default function Dashboard() {
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
     const x = d3.scaleTime()
-      .domain(d3.extent(data, d => d.date))
+      .domain(d3.extent(data, d => d.date) as [Date, Date])
       .range([0, width]);
 
     const y = d3.scaleLinear()
-      .domain([d3.min(data, d => d.low) * 0.95, d3.max(data, d => d.high) * 1.05])
+      .domain([(d3.min(data, d => d.low) || 0) * 0.95, (d3.max(data, d => d.high) || 0) * 1.05])
       .range([height, 0]);
 
     const startPrice = data[0].close;
