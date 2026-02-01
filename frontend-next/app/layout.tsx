@@ -9,7 +9,7 @@ export const metadata = {
   description: 'Track performance, analyze trends, and discover top-performing stocks with our powerful stock tracking platform.',
 }
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={inter.className}>

@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { PerformanceAnalysisProps, PerformanceResponse } from '../../types';
 
-const PerformanceAnalysis = ({ onSelectStock }) => {
-  const [performance, setPerformance] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState('1M');
+const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock }) => {
+  const [performance, setPerformance] = useState<PerformanceResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [selectedPeriod, setSelectedPeriod] = useState<'1M' | 'YTD' | '6M' | '1Y'>('1M');
 
   const BACKEND_URL = 'http://127.0.0.1:8000/api';
 
@@ -46,7 +47,7 @@ const PerformanceAnalysis = ({ onSelectStock }) => {
 
       {/* Period Selector */}
       <div className="flex gap-2 mb-6 justify-center">
-        {['1M', 'YTD', '6M', '1Y'].map(period => (
+        {(['1M', 'YTD', '6M', '1Y'] as const).map(period => (
           <button
             key={period}
             onClick={() => setSelectedPeriod(period)}

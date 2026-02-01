@@ -5,27 +5,28 @@ import * as d3 from 'd3';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import PerformanceAnalysis from '../../components/dashboard/PerformanceAnalysis';
+import { Stock, StockPriceData, StockPrice, TimeRange } from '../../types';
 
 export default function Dashboard() {
   const { data: session } = useSession();
-  const [allStocks, setAllStocks] = useState([]);
-  const [selectedSymbols, setSelectedSymbols] = useState(['NVDA', 'AAPL', 'MSFT', 'META', 'GOOGL', 'AMZN']);
-  const [allPrices, setAllPrices] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [loadingList, setLoadingList] = useState(true);
-  const [error, setError] = useState(null);
-  const [chartTimeRanges, setChartTimeRanges] = useState({});
-  const svgRefs = useRef({});
+  const [allStocks, setAllStocks] = useState<Stock[]>([]);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['NVDA', 'AAPL', 'MSFT', 'META', 'GOOGL', 'AMZN']);
+  const [allPrices, setAllPrices] = useState<Record<string, StockPriceData>>({});
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadingList, setLoadingList] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [chartTimeRanges, setChartTimeRanges] = useState<Record<string, string>>({});
+  const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
 
   const BACKEND_URL = 'http://127.0.0.1:8000/api';
 
-  const timeRanges = [
+  const timeRanges: TimeRange[] = [
     { label: '1M', weeks: 4 },
     { label: '6M', weeks: 26 },
-    { label: 'YTD', weeks: 'ytd' },
+    { label: 'YTD', weeks: 'ytd' as const },
     { label: '1Y', weeks: 52 },
     { label: '5Y', weeks: 260 },
-    { label: 'MAX', weeks: 'max' }
+    { label: 'MAX', weeks: 'max' as const }
   ];
 
   // Fetch list of all available stocks
@@ -37,7 +38,7 @@ export default function Dashboard() {
       setAllStocks(data.stocks || []);
     } catch (err) {
       console.error('Failed to fetch stocks list:', err);
-      setError('Failed to load stocks list: ' + err.message);
+      setError('Failed to load stocks list: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoadingList(false);
     }
@@ -59,7 +60,7 @@ export default function Dashboard() {
         setAllPrices(result.data);
 
         // Initialize time ranges for new stocks
-        const newRanges = {};
+        const newRanges: Record<string, string> = {};
         selectedSymbols.forEach(symbol => {
           if (!chartTimeRanges[symbol]) {
             newRanges[symbol] = '1Y';
@@ -75,7 +76,7 @@ export default function Dashboard() {
       }
 
     } catch (err) {
-      setError('Failed to fetch data from backend: ' + err.message);
+      setError('Failed to fetch data from backend: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoading(false);
     }
@@ -99,7 +100,7 @@ export default function Dashboard() {
     });
   }, [allPrices, chartTimeRanges]);
 
-  const toggleStock = (symbol) => {
+  const toggleStock = (symbol: string) => {
     setSelectedSymbols(prev => {
       if (prev.includes(symbol)) {
         const newRanges = { ...chartTimeRanges };
@@ -113,11 +114,11 @@ export default function Dashboard() {
     });
   };
 
-  const setTimeRangeForChart = (symbol, range) => {
+  const setTimeRangeForChart = (symbol: string, range: string) => {
     setChartTimeRanges(prev => ({ ...prev, [symbol]: range }));
   };
 
-  const getFilteredData = (data, range) => {
+  const getFilteredData = (data: StockPrice[], range: string): StockPrice[] => {
     if (range === 'max') {
       return data;
     }
@@ -125,7 +126,7 @@ export default function Dashboard() {
     if (range === 'ytd') {
       const now = new Date();
       const startOfYear = new Date(now.getFullYear(), 0, 1);
-      return data.filter(d => d.date >= startOfYear);
+      return data.filter((d: StockPrice) => d.date >= startOfYear);
     }
 
     const rangeConfig = timeRanges.find(r => r.label === range);
@@ -136,15 +137,15 @@ export default function Dashboard() {
     return data.slice(-52);
   };
 
-  const drawChart = (symbol, prices, timeRange) => {
+  const drawChart = (symbol: string, prices: StockPriceData, timeRange: string) => {
     if (!prices || !prices['Weekly Time Series']) return;
 
     const svgElement = svgRefs.current[symbol];
     if (!svgElement) return;
 
     const timeSeries = prices['Weekly Time Series'];
-    let data = Object.entries(timeSeries)
-      .map(([date, values]) => ({
+    let data: StockPrice[] = Object.entries(timeSeries)
+      .map(([date, values]: [string, any]) => ({
         date: new Date(date),
         close: parseFloat(values['4. close']),
         open: parseFloat(values['1. open']),
@@ -152,7 +153,7 @@ export default function Dashboard() {
         low: parseFloat(values['3. low']),
         volume: parseFloat(values['5. volume'])
       }))
-      .sort((a, b) => a.date - b.date);
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     data = getFilteredData(data, timeRange);
 
@@ -184,7 +185,7 @@ export default function Dashboard() {
     const lineColor = isPositive ? '#16a34a' : '#dc2626';
     const areaColor = isPositive ? '#16a34a' : '#dc2626';
 
-    const line = d3.line()
+    const line = d3.line<StockPrice>()
       .x(d => x(d.date))
       .y(d => y(d.close))
       .curve(d3.curveMonotoneX);
@@ -208,7 +209,7 @@ export default function Dashboard() {
       .attr('stop-color', areaColor)
       .attr('stop-opacity', 0);
 
-    const area = d3.area()
+    const area = d3.area<StockPrice>()
       .x(d => x(d.date))
       .y0(height)
       .y1(d => y(d.close))
@@ -225,7 +226,7 @@ export default function Dashboard() {
       .attr('transform', 'rotate(-45)');
 
     svg.append('g')
-      .call(d3.axisLeft(y).tickFormat(d => `$${d.toFixed(0)}`))
+      .call(d3.axisLeft(y).tickFormat(d => `$${Number(d).toFixed(0)}`))
       .style('color', '#666');
 
     svg.append('g')
@@ -233,7 +234,7 @@ export default function Dashboard() {
       .attr('opacity', 0.1)
       .call(d3.axisLeft(y)
         .tickSize(-width)
-        .tickFormat('')
+        .tickFormat(() => '')
       );
 
     svg.append('path')
@@ -302,7 +303,7 @@ export default function Dashboard() {
       .attr('text-anchor', 'middle');
 
     const tooltipId = `tooltip-${symbol}`;
-    let tooltip = d3.select(`#${tooltipId}`);
+    let tooltip: d3.Selection<HTMLDivElement, unknown, HTMLElement, any> = d3.select<HTMLDivElement, unknown>(`#${tooltipId}`);
 
     if (tooltip.empty()) {
       tooltip = d3.select('body')
@@ -329,13 +330,13 @@ export default function Dashboard() {
         const [mouseX] = d3.pointer(event);
         const xDate = x.invert(mouseX);
 
-        const bisect = d3.bisector(d => d.date).left;
+        const bisect = d3.bisector((d: StockPrice) => d.date).left;
         const index = bisect(data, xDate);
 
         if (index > 0 && index < data.length) {
           const d0 = data[index - 1];
           const d1 = data[index];
-          const d = xDate - d0.date > d1.date - xDate ? d1 : d0;
+          const d = xDate.getTime() - d0.date.getTime() > d1.date.getTime() - xDate.getTime() ? d1 : d0;
 
           verticalLine
             .attr('x1', x(d.date))
@@ -375,7 +376,7 @@ export default function Dashboard() {
       });
   };
 
-  const handleSelectStockFromAnalysis = (symbol) => {
+  const handleSelectStockFromAnalysis = (symbol: string) => {
     if (!selectedSymbols.includes(symbol)) {
       setSelectedSymbols(prev => [...prev, symbol]);
       setChartTimeRanges(prev => ({ ...prev, [symbol]: '1Y' }));
@@ -502,7 +503,7 @@ export default function Dashboard() {
               </div>
 
               <svg
-                ref={el => svgRefs.current[symbol] = el}
+                ref={el => { svgRefs.current[symbol] = el; }}
                 className="w-full"
                 style={{ height: '500px' }}
               ></svg>

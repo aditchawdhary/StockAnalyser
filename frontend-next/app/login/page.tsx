@@ -6,13 +6,13 @@ import Link from 'next/link'
 
 export default function Login() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState<string>('')
+  const [password, setPassword] = useState<string>('')
+  const [isSignUp, setIsSignUp] = useState<boolean>(false)
+  const [error, setError] = useState<string>('')
+  const [loading, setLoading] = useState<boolean>(false)
 
-  const handleEmailAuth = async (e) => {
+  const handleEmailAuth = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
     setLoading(true)
@@ -63,7 +63,7 @@ export default function Login() {
     }
   }
 
-  const handleOAuthLogin = async (provider) => {
+  const handleOAuthLogin = async (provider: string) => {
     setLoading(true)
     try {
       await signIn(provider, {

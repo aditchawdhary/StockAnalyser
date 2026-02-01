@@ -5,8 +5,8 @@ import Link from 'next/link';
 import Button from '../shared/Button';
 import * as THREE from 'three';
 
-const CTASection = () => {
-  const mountRef = useRef(null);
+const CTASection: React.FC = () => {
+  const mountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -43,8 +43,8 @@ const CTASection = () => {
     const pointsPerTurn = 90;
     const totalPoints = turns * pointsPerTurn;
 
-    const helix1Points = [];
-    const helix2Points = [];
+    const helix1Points: THREE.Vector3[] = [];
+    const helix2Points: THREE.Vector3[] = [];
 
     for (let i = 0; i <= totalPoints; i++) {
       const t = i / pointsPerTurn;
@@ -62,7 +62,7 @@ const CTASection = () => {
 
     // Sleek tubes
     const curve1 = new THREE.CatmullRomCurve3(helix1Points);
-    const tubeGeometry1 = new THREE.TubeGeometry(curve1, totalPoints, 0.08, 12, false);
+    const tubeGeometry1 = new THREE.TubeGeometry(curve1, totalPoints, 0.25, 12, false);
     const tubeMaterial1 = new THREE.MeshStandardMaterial({
       color: 0x10b981, // Green color matching your theme
       metalness: 0.8,
@@ -74,7 +74,7 @@ const CTASection = () => {
     helixGroup.add(tube1);
 
     const curve2 = new THREE.CatmullRomCurve3(helix2Points);
-    const tubeGeometry2 = new THREE.TubeGeometry(curve2, totalPoints, 0.08, 12, false);
+    const tubeGeometry2 = new THREE.TubeGeometry(curve2, totalPoints, 0.25, 12, false);
     const tubeMaterial2 = new THREE.MeshStandardMaterial({
       color: 0x14b8a6, // Teal color matching your theme
       metalness: 0.8,

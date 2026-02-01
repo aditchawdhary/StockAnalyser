@@ -244,10 +244,270 @@ def get_stock_performance(request):
         
         # Sort by percent change
         stocks_performance.sort(key=lambda x: x['percent_change'], reverse=True)
-        
+
         results[period_name] = {
             'top_gainers': stocks_performance[:10],
             'top_losers': stocks_performance[-10:][::-1]  # Reverse to show worst first
         }
-    
+
     return Response(results)
+
+
+@api_view(['GET'])
+def sp500_top_performers(request):
+    """Get top 20 best and worst performing S&P 500 stocks"""
+    from datetime import datetime, timedelta
+
+    # Get time period from request (default to 1 year)
+    period = request.GET.get('period', '1Y')
+
+    now = datetime.now().date()
+    period_map = {
+        '1D': timedelta(days=1),
+        '1W': timedelta(weeks=1),
+        '1M': timedelta(days=30),
+        'YTD': None,  # Calculated separately
+        '6M': timedelta(days=180),
+        '1Y': timedelta(days=365),
+    }
+
+    start_date = now - period_map.get(period, timedelta(days=365)) if period != 'YTD' else datetime(now.year, 1, 1).date()
+
+    # Get only S&P 500 stocks
+    sp500_stocks = Stock.objects.filter(is_sp500=True).prefetch_related('prices')
+
+    stocks_performance = []
+
+    for stock in sp500_stocks:
+        # Get adjusted prices if available, otherwise raw prices
+        prices_qs = stock.adjusted_prices if hasattr(stock, 'adjusted_prices') and stock.adjusted_prices.exists() else stock.prices
+
+        start_price = prices_qs.filter(date__gte=start_date).order_by('date').first()
+        end_price = prices_qs.order_by('-date').first()
+
+        if start_price and end_price and start_price != end_price:
+            # Use adjusted prices if available
+            if hasattr(start_price, 'adjusted_close'):
+                start_value = float(start_price.adjusted_close)
+                end_value = float(end_price.adjusted_close)
+            else:
+                start_value = float(start_price.close_price)
+                end_value = float(end_price.close_price)
+
+            price_change = end_value - start_value
+            percent_change = (price_change / start_value) * 100
+
+            stocks_performance.append({
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'industry': stock.industry,
+                'sector': stock.sector,
+                'start_price': round(start_value, 2),
+                'current_price': round(end_value, 2),
+                'price_change': round(price_change, 2),
+                'percent_change': round(percent_change, 2),
+                'start_date': str(start_price.date),
+                'end_date': str(end_price.date)
+            })
+
+    # Sort by percent change
+    stocks_performance.sort(key=lambda x: x['percent_change'], reverse=True)
+
+    return Response({
+        'period': period,
+        'start_date': str(start_date),
+        'end_date': str(now),
+        'total_stocks': len(stocks_performance),
+        'top_20_gainers': stocks_performance[:20],
+        'top_20_losers': stocks_performance[-20:][::-1]
+    })
+
+
+@api_view(['GET'])
+def search_stocks(request):
+    """Search for stocks by symbol or name"""
+    query = request.GET.get('q', '').strip()
+
+    if not query:
+        return Response(
+            {'error': 'Search query is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Search by symbol or name (case-insensitive)
+    stocks = Stock.objects.filter(
+        models.Q(symbol__icontains=query) |
+        models.Q(name__icontains=query)
+    ).values('symbol', 'name', 'industry', 'sector', 'is_sp500', 'last_updated')[:50]
+
+    return Response({
+        'query': query,
+        'count': len(stocks),
+        'results': list(stocks)
+    })
+
+
+@api_view(['GET'])
+def stocks_by_industry(request):
+    """Get stocks grouped by industry"""
+    from django.db.models import Count
+
+    # Get industry parameter for filtering
+    industry = request.GET.get('industry', None)
+
+    if industry:
+        # Get stocks in a specific industry
+        stocks = Stock.objects.filter(industry=industry).prefetch_related('prices').order_by('symbol')
+
+        stocks_data = []
+        for stock in stocks:
+            latest_price = stock.prices.order_by('-date').first()
+
+            stock_info = {
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'industry': stock.industry,
+                'sector': stock.sector,
+                'is_sp500': stock.is_sp500,
+            }
+
+            if latest_price:
+                stock_info['latest_price'] = str(latest_price.close_price)
+                stock_info['latest_date'] = str(latest_price.date)
+
+            stocks_data.append(stock_info)
+
+        return Response({
+            'industry': industry,
+            'count': len(stocks_data),
+            'stocks': stocks_data
+        })
+    else:
+        # Get all industries with stock counts
+        industries = Stock.objects.values('industry').annotate(
+            stock_count=Count('id')
+        ).exclude(industry__isnull=True).exclude(industry='').order_by('-stock_count')
+
+        return Response({
+            'total_industries': len(industries),
+            'industries': list(industries)
+        })
+
+
+@api_view(['GET'])
+def get_adjusted_stock_data(request, symbol):
+    """Get adjusted stock data (accounting for splits) for a single symbol"""
+    try:
+        stock = Stock.objects.prefetch_related('adjusted_prices', 'splits').get(symbol=symbol.upper())
+
+        # Get time period
+        weeks = int(request.GET.get('weeks', 52))
+        start_date = datetime.now().date() - timedelta(weeks=weeks)
+
+        # Get adjusted prices
+        adjusted_prices = stock.adjusted_prices.filter(date__gte=start_date)
+
+        # Get stock splits in the period
+        splits = stock.splits.filter(split_date__gte=start_date).values(
+            'split_date', 'split_ratio', 'description'
+        )
+
+        # Format data
+        price_data = {}
+        for price in adjusted_prices:
+            price_data[str(price.date)] = {
+                '1. open': str(price.adjusted_open),
+                '2. high': str(price.adjusted_high),
+                '3. low': str(price.adjusted_low),
+                '4. close': str(price.adjusted_close),
+                '5. volume': str(price.adjusted_volume),
+                '6. split_coefficient': str(price.split_coefficient)
+            }
+
+        response_data = {
+            'meta_data': {
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'industry': stock.industry,
+                'sector': stock.sector,
+                'is_sp500': stock.is_sp500,
+                'last_updated': str(stock.last_updated),
+            },
+            'adjusted_prices': price_data,
+            'splits': list(splits),
+            'period_weeks': weeks
+        }
+
+        return Response(response_data)
+
+    except Stock.DoesNotExist:
+        return Response(
+            {'error': f'Stock {symbol} not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+@api_view(['GET'])
+def weekly_chart_data(request, symbol):
+    """Get weekly aggregated data for charting (optimized for graphs)"""
+    try:
+        stock = Stock.objects.prefetch_related('prices').get(symbol=symbol.upper())
+
+        weeks = int(request.GET.get('weeks', 52))
+        start_date = datetime.now().date() - timedelta(weeks=weeks)
+
+        prices = stock.prices.filter(date__gte=start_date).order_by('date')
+
+        # Group by week and aggregate
+        from datetime import date
+        weekly_data = []
+        current_week_data = []
+        last_week_start = None
+
+        for price in prices:
+            # Get week start (Monday)
+            week_start = price.date - timedelta(days=price.date.weekday())
+
+            if last_week_start is None:
+                last_week_start = week_start
+
+            if week_start != last_week_start:
+                # Process previous week
+                if current_week_data:
+                    weekly_data.append({
+                        'week_start': str(last_week_start),
+                        'open': str(current_week_data[0].open_price),
+                        'close': str(current_week_data[-1].close_price),
+                        'high': str(max(p.high_price for p in current_week_data)),
+                        'low': str(min(p.low_price for p in current_week_data)),
+                        'volume': str(sum(p.volume for p in current_week_data)),
+                    })
+                current_week_data = []
+                last_week_start = week_start
+
+            current_week_data.append(price)
+
+        # Process last week
+        if current_week_data:
+            weekly_data.append({
+                'week_start': str(last_week_start),
+                'open': str(current_week_data[0].open_price),
+                'close': str(current_week_data[-1].close_price),
+                'high': str(max(p.high_price for p in current_week_data)),
+                'low': str(min(p.low_price for p in current_week_data)),
+                'volume': str(sum(p.volume for p in current_week_data)),
+            })
+
+        return Response({
+            'symbol': stock.symbol,
+            'name': stock.name,
+            'weeks': weeks,
+            'data_points': len(weekly_data),
+            'weekly_data': weekly_data
+        })
+
+    except Stock.DoesNotExist:
+        return Response(
+            {'error': f'Stock {symbol} not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )

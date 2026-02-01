@@ -2,11 +2,25 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Single stock data
     path('stock/<str:symbol>/', views.get_stock_data, name='get_stock_data'),
+    path('stock/<str:symbol>/adjusted/', views.get_adjusted_stock_data, name='get_adjusted_stock_data'),
+    path('stock/<str:symbol>/weekly/', views.weekly_chart_data, name='weekly_chart_data'),
+
+    # Multiple stocks
     path('stocks/', views.get_multiple_stocks, name='get_multiple_stocks'),
     path('stocks/list/', views.get_all_stocks_list, name='get_all_stocks_list'),
     path('stocks/summary/', views.get_stock_summary, name='get_stock_summary'),
-    path('stocks/performance/', views.get_stock_performance, name='get_stock_performance'),  # NEW
+    path('stocks/performance/', views.get_stock_performance, name='get_stock_performance'),
+
+    # S&P 500 specific
+    path('sp500/top-performers/', views.sp500_top_performers, name='sp500_top_performers'),
+
+    # Search and filter
+    path('search/', views.search_stocks, name='search_stocks'),
+    path('industry/', views.stocks_by_industry, name='stocks_by_industry'),
+
+    # Admin functions
     path('refresh/', views.refresh_stocks, name='refresh_stocks'),
     path('stats/', views.stock_stats, name='stock_stats'),
 ]
