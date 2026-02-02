@@ -47,49 +47,169 @@ def get_stock_data(request, symbol):
 
 @api_view(['GET'])
 def get_multiple_stocks(request):
-    """Get weekly stock data for multiple symbols from database"""
-    
+    """Get daily or weekly stock data for multiple symbols from database, auto-fetch if missing"""
+    from django.core.management import call_command
+    from io import StringIO
+    from .models import DailyStock, DailyStockPrice
+
     symbols = request.GET.get('symbols', '').split(',')
     symbols = [s.strip().upper() for s in symbols if s.strip()]
-    
+
+    # Check if daily data is requested
+    data_type = request.GET.get('type', 'weekly').lower()  # 'daily' or 'weekly'
+    use_daily = data_type == 'daily'
+
     if not symbols:
         return Response(
-            {'error': 'No symbols provided'}, 
+            {'error': 'No symbols provided'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     results = {}
     errors = []
-    
-    one_year_ago = datetime.now().date() - timedelta(weeks=52)
-    
+    missing_symbols = []
+
+    # Determine lookback period based on data type
+    if use_daily:
+        # For daily data, get last 2 years (enough for 1Y range)
+        lookback = datetime.now().date() - timedelta(days=730)
+    else:
+        # For weekly data, get all available data (for MAX) or at least 6 years (for 5Y range)
+        # We don't set a lookback for weekly to get all data
+        lookback = None
+
+    # First pass: check which stocks exist
     for symbol in symbols:
         try:
-            stock = Stock.objects.prefetch_related('prices').get(symbol=symbol)
-            prices = stock.prices.filter(date__gte=one_year_ago)
-            
-            weekly_data = {}
-            for price in prices:
-                weekly_data[str(price.date)] = {
-                    '1. open': str(price.open_price),
-                    '2. high': str(price.high_price),
-                    '3. low': str(price.low_price),
-                    '4. close': str(price.close_price),
-                    '5. volume': str(price.volume)
+            if use_daily:
+                # Fetch from daily database
+                stock = DailyStock.objects.using('daily').prefetch_related('daily_prices').get(symbol=symbol)
+                prices = DailyStockPrice.objects.using('daily').filter(
+                    stock=stock,
+                    date__gte=lookback
+                ).order_by('date')
+
+                time_series = {}
+                for price in prices:
+                    time_series[str(price.date)] = {
+                        '1. open': str(price.open_price),
+                        '2. high': str(price.high_price),
+                        '3. low': str(price.low_price),
+                        '4. close': str(price.close_price),
+                        '5. volume': str(price.volume)
+                    }
+
+                results[symbol] = {
+                    'Meta Data': {
+                        '1. Information': 'Daily Prices (from database)',
+                        '2. Symbol': stock.symbol,
+                        '3. Last Refreshed': str(stock.last_updated),
+                    },
+                    'Time Series (Daily)': time_series
                 }
-            
-            results[symbol] = {
-                'Meta Data': {
-                    '1. Information': 'Weekly Prices (from database)',
-                    '2. Symbol': stock.symbol,
-                    '3. Last Refreshed': str(stock.last_updated),
-                },
-                'Weekly Time Series': weekly_data
-            }
-            
-        except Stock.DoesNotExist:
-            errors.append(f'{symbol}: Not found in database')
-    
+            else:
+                # Fetch from weekly database
+                stock = Stock.objects.prefetch_related('prices').get(symbol=symbol)
+                # Get all available weekly data (no date filter)
+                prices = stock.prices.all()
+
+                weekly_data = {}
+                for price in prices:
+                    weekly_data[str(price.date)] = {
+                        '1. open': str(price.open_price),
+                        '2. high': str(price.high_price),
+                        '3. low': str(price.low_price),
+                        '4. close': str(price.close_price),
+                        '5. volume': str(price.volume)
+                    }
+
+                results[symbol] = {
+                    'Meta Data': {
+                        '1. Information': 'Weekly Prices (from database)',
+                        '2. Symbol': stock.symbol,
+                        '3. Last Refreshed': str(stock.last_updated),
+                    },
+                    'Weekly Time Series': weekly_data
+                }
+
+        except (Stock.DoesNotExist, DailyStock.DoesNotExist):
+            missing_symbols.append(symbol)
+
+    # Second pass: fetch missing stocks from Alpha Vantage
+    if missing_symbols:
+        out = StringIO()
+        try:
+            # Fetch missing stocks (this will populate both weekly and daily databases)
+            if use_daily:
+                call_command('fetch_daily_stocks', symbols=','.join(missing_symbols), force=True, stdout=out)
+
+                # Try to retrieve the newly fetched stocks from daily database
+                for symbol in missing_symbols:
+                    try:
+                        stock = DailyStock.objects.using('daily').prefetch_related('daily_prices').get(symbol=symbol)
+                        prices = DailyStockPrice.objects.using('daily').filter(
+                            stock=stock,
+                            date__gte=lookback
+                        ).order_by('date')
+
+                        time_series = {}
+                        for price in prices:
+                            time_series[str(price.date)] = {
+                                '1. open': str(price.open_price),
+                                '2. high': str(price.high_price),
+                                '3. low': str(price.low_price),
+                                '4. close': str(price.close_price),
+                                '5. volume': str(price.volume)
+                            }
+
+                        results[symbol] = {
+                            'Meta Data': {
+                                '1. Information': 'Daily Prices (fetched from Alpha Vantage)',
+                                '2. Symbol': stock.symbol,
+                                '3. Last Refreshed': str(stock.last_updated),
+                            },
+                            'Time Series (Daily)': time_series
+                        }
+
+                    except DailyStock.DoesNotExist:
+                        errors.append(f'{symbol}: Failed to fetch from Alpha Vantage')
+            else:
+                call_command('fetch_stocks', symbols=','.join(missing_symbols), force=True, stdout=out)
+
+                # Try to retrieve the newly fetched stocks from weekly database
+                for symbol in missing_symbols:
+                    try:
+                        stock = Stock.objects.prefetch_related('prices').get(symbol=symbol)
+                        # Get all available weekly data (no date filter)
+                        prices = stock.prices.all()
+
+                        weekly_data = {}
+                        for price in prices:
+                            weekly_data[str(price.date)] = {
+                                '1. open': str(price.open_price),
+                                '2. high': str(price.high_price),
+                                '3. low': str(price.low_price),
+                                '4. close': str(price.close_price),
+                                '5. volume': str(price.volume)
+                            }
+
+                        results[symbol] = {
+                            'Meta Data': {
+                                '1. Information': 'Weekly Prices (fetched from Alpha Vantage)',
+                                '2. Symbol': stock.symbol,
+                                '3. Last Refreshed': str(stock.last_updated),
+                            },
+                            'Weekly Time Series': weekly_data
+                        }
+
+                    except Stock.DoesNotExist:
+                        errors.append(f'{symbol}: Failed to fetch from Alpha Vantage')
+
+        except Exception as e:
+            for symbol in missing_symbols:
+                if symbol not in results:
+                    errors.append(f'{symbol}: {str(e)}')
+
     return Response({
         'data': results,
         'errors': errors
@@ -197,51 +317,116 @@ def stock_stats(request):
 
 @api_view(['GET'])
 def get_stock_performance(request):
-    """Get top winners and losers for different time periods"""
+    """Get top winners and losers for different time periods using daily or weekly data"""
     from django.db.models import Q
     from datetime import datetime, timedelta
-    
+    from .models import DailyStock, DailyStockPrice
+
     # Define time periods
     now = datetime.now().date()
+    one_day_ago = now - timedelta(days=1)
+    one_week_ago = now - timedelta(days=7)
     one_month_ago = now - timedelta(days=30)
     six_months_ago = now - timedelta(days=180)
     one_year_ago = now - timedelta(days=365)
+    five_years_ago = now - timedelta(days=1825)  # 5 * 365
     start_of_year = datetime(now.year, 1, 1).date()
-    
+
     time_periods = {
+        '1D': one_day_ago,
+        '1W': one_week_ago,
         '1M': one_month_ago,
         'YTD': start_of_year,
         '6M': six_months_ago,
-        '1Y': one_year_ago
+        '1Y': one_year_ago,
+        '5Y': five_years_ago
     }
-    
+
     results = {}
-    
+
     for period_name, start_date in time_periods.items():
         stocks_performance = []
-        
-        stocks = Stock.objects.all()
-        
-        for stock in stocks:
-            # Get prices at start and end of period
-            start_price = stock.prices.filter(date__gte=start_date).order_by('date').first()
-            end_price = stock.prices.order_by('-date').first()
-            
-            if start_price and end_price and start_price != end_price:
-                price_change = float(end_price.close_price) - float(start_price.close_price)
-                percent_change = (price_change / float(start_price.close_price)) * 100
-                
-                stocks_performance.append({
-                    'symbol': stock.symbol,
-                    'name': stock.name,
-                    'start_price': float(start_price.close_price),
-                    'end_price': float(end_price.close_price),
-                    'price_change': round(price_change, 2),
-                    'percent_change': round(percent_change, 2),
-                    'start_date': str(start_price.date),
-                    'end_date': str(end_price.date)
-                })
-        
+
+        # Use daily data for 1D and 1W, weekly data for other periods
+        use_daily_data = period_name in ['1D', '1W']
+
+        if use_daily_data:
+            # Use daily database for short-term analysis
+            stocks = DailyStock.objects.using('daily').all()
+
+            for stock in stocks:
+                # For 1D: get last 2 trading days, for 1W: get last week of data
+                if period_name == '1D':
+                    # Get the last 2 available trading days
+                    recent_prices = DailyStockPrice.objects.using('daily').filter(
+                        stock=stock
+                    ).order_by('-date')[:2]
+
+                    if len(recent_prices) == 2:
+                        end_price = recent_prices[0]
+                        start_price = recent_prices[1]
+
+                        price_change = float(end_price.close_price) - float(start_price.close_price)
+                        percent_change = (price_change / float(start_price.close_price)) * 100
+
+                        stocks_performance.append({
+                            'symbol': stock.symbol,
+                            'name': stock.name,
+                            'start_price': float(start_price.close_price),
+                            'end_price': float(end_price.close_price),
+                            'price_change': round(price_change, 2),
+                            'percent_change': round(percent_change, 2),
+                            'start_date': str(start_price.date),
+                            'end_date': str(end_price.date)
+                        })
+                else:
+                    # For 1W: get data from start_date onwards
+                    start_price = DailyStockPrice.objects.using('daily').filter(
+                        stock=stock,
+                        date__gte=start_date
+                    ).order_by('date').first()
+                    end_price = DailyStockPrice.objects.using('daily').filter(
+                        stock=stock
+                    ).order_by('-date').first()
+
+                    if start_price and end_price and start_price != end_price:
+                        price_change = float(end_price.close_price) - float(start_price.close_price)
+                        percent_change = (price_change / float(start_price.close_price)) * 100
+
+                        stocks_performance.append({
+                            'symbol': stock.symbol,
+                            'name': stock.name,
+                            'start_price': float(start_price.close_price),
+                            'end_price': float(end_price.close_price),
+                            'price_change': round(price_change, 2),
+                            'percent_change': round(percent_change, 2),
+                            'start_date': str(start_price.date),
+                            'end_date': str(end_price.date)
+                        })
+        else:
+            # Use weekly data for longer-term analysis
+            stocks = Stock.objects.all()
+
+            for stock in stocks:
+                # Get prices at start and end of period from weekly data
+                start_price = stock.prices.filter(date__gte=start_date).order_by('date').first()
+                end_price = stock.prices.order_by('-date').first()
+
+                if start_price and end_price and start_price != end_price:
+                    price_change = float(end_price.close_price) - float(start_price.close_price)
+                    percent_change = (price_change / float(start_price.close_price)) * 100
+
+                    stocks_performance.append({
+                        'symbol': stock.symbol,
+                        'name': stock.name,
+                        'start_price': float(start_price.close_price),
+                        'end_price': float(end_price.close_price),
+                        'price_change': round(price_change, 2),
+                        'percent_change': round(percent_change, 2),
+                        'start_date': str(start_price.date),
+                        'end_date': str(end_price.date)
+                    })
+
         # Sort by percent change
         stocks_performance.sort(key=lambda x: x['percent_change'], reverse=True)
 
@@ -511,3 +696,471 @@ def weekly_chart_data(request, symbol):
             {'error': f'Stock {symbol} not found'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+
+@api_view(['GET'])
+def get_stock_overview(request, symbol):
+    """
+    Get company overview data for a stock.
+    Caches data for 48 hours, fetches from Alpha Vantage if stale/missing.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    import requests
+    import os
+    from .models import StockOverview
+
+    try:
+        # Try to get stock from database
+        stock = Stock.objects.get(symbol=symbol.upper())
+
+        # Check if we have recent cached overview data
+        try:
+            overview = stock.overview
+            # Cache is valid for 48 hours
+            if timezone.now() - overview.last_updated < timedelta(hours=48):
+                return Response({
+                    'symbol': stock.symbol,
+                    'name': stock.name,
+                    'overview': {
+                        'Symbol': stock.symbol,
+                        'AssetType': overview.asset_type,
+                        'Name': stock.name,
+                        'Exchange': overview.exchange,
+                        'Currency': overview.currency,
+                        'Country': overview.country,
+                        'Sector': overview.sector,
+                        'Industry': overview.industry,
+                        'Description': overview.description,
+                        'Address': overview.address,
+                        'FiscalYearEnd': overview.fiscal_year_end,
+                        'MarketCapitalization': str(overview.market_capitalization) if overview.market_capitalization else 'None',
+                        'EBITDA': str(overview.ebitda) if overview.ebitda else 'None',
+                        'PERatio': str(overview.pe_ratio) if overview.pe_ratio else 'None',
+                        'PEGRatio': str(overview.peg_ratio) if overview.peg_ratio else 'None',
+                        'BookValue': str(overview.book_value) if overview.book_value else 'None',
+                        'DividendPerShare': str(overview.dividend_per_share) if overview.dividend_per_share else 'None',
+                        'DividendYield': str(overview.dividend_yield) if overview.dividend_yield else 'None',
+                        'EPS': str(overview.eps) if overview.eps else 'None',
+                        'RevenuePerShareTTM': str(overview.revenue_per_share_ttm) if overview.revenue_per_share_ttm else 'None',
+                        'ProfitMargin': str(overview.profit_margin) if overview.profit_margin else 'None',
+                        'OperatingMarginTTM': str(overview.operating_margin_ttm) if overview.operating_margin_ttm else 'None',
+                        'ReturnOnAssetsTTM': str(overview.return_on_assets_ttm) if overview.return_on_assets_ttm else 'None',
+                        'ReturnOnEquityTTM': str(overview.return_on_equity_ttm) if overview.return_on_equity_ttm else 'None',
+                        'RevenueTTM': str(overview.revenue_ttm) if overview.revenue_ttm else 'None',
+                        'GrossProfitTTM': str(overview.gross_profit_ttm) if overview.gross_profit_ttm else 'None',
+                        'QuarterlyEarningsGrowthYOY': str(overview.quarterly_earnings_growth_yoy) if overview.quarterly_earnings_growth_yoy else 'None',
+                        'QuarterlyRevenueGrowthYOY': str(overview.quarterly_revenue_growth_yoy) if overview.quarterly_revenue_growth_yoy else 'None',
+                        'AnalystTargetPrice': str(overview.analyst_target_price) if overview.analyst_target_price else 'None',
+                        'TrailingPE': str(overview.trailing_pe) if overview.trailing_pe else 'None',
+                        'ForwardPE': str(overview.forward_pe) if overview.forward_pe else 'None',
+                        'PriceToSalesRatioTTM': str(overview.price_to_sales_ratio_ttm) if overview.price_to_sales_ratio_ttm else 'None',
+                        'PriceToBookRatio': str(overview.price_to_book_ratio) if overview.price_to_book_ratio else 'None',
+                        'Beta': str(overview.beta) if overview.beta else 'None',
+                        '52WeekHigh': str(overview.week_52_high) if overview.week_52_high else 'None',
+                        '52WeekLow': str(overview.week_52_low) if overview.week_52_low else 'None',
+                        '50DayMovingAverage': str(overview.day_50_moving_average) if overview.day_50_moving_average else 'None',
+                        '200DayMovingAverage': str(overview.day_200_moving_average) if overview.day_200_moving_average else 'None',
+                        'SharesOutstanding': str(overview.shares_outstanding) if overview.shares_outstanding else 'None',
+                        'SharesFloat': str(overview.shares_float) if overview.shares_float else 'None',
+                        'PercentInsiders': str(overview.percent_insiders) if overview.percent_insiders else 'None',
+                        'PercentInstitutions': str(overview.percent_institutions) if overview.percent_institutions else 'None',
+                    },
+                    'cached': True
+                })
+        except StockOverview.DoesNotExist:
+            pass
+
+        # Fetch fresh data from Alpha Vantage
+        api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return Response(
+                {'error': 'Alpha Vantage API key not configured'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        url = f'https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={api_key}'
+
+        response = requests.get(url, timeout=30)
+        data = response.json()
+
+        # Check for API errors
+        if 'Error Message' in data or not data or not data.get('Symbol'):
+            return Response(
+                {'error': f'Could not fetch overview for {symbol}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Helper to safely parse values
+        def parse_value(value, parser=str):
+            if value in ['None', 'N/A', '', '-', None]:
+                return None
+            try:
+                return parser(value)
+            except (ValueError, TypeError):
+                return None
+
+        # Create or update StockOverview
+        overview, created = StockOverview.objects.update_or_create(
+            stock=stock,
+            defaults={
+                'asset_type': data.get('AssetType', ''),
+                'exchange': data.get('Exchange', ''),
+                'currency': data.get('Currency', ''),
+                'country': data.get('Country', ''),
+                'sector': data.get('Sector', ''),
+                'industry': data.get('Industry', ''),
+                'description': data.get('Description', ''),
+                'address': data.get('Address', ''),
+                'fiscal_year_end': data.get('FiscalYearEnd', ''),
+                'market_capitalization': parse_value(data.get('MarketCapitalization'), int),
+                'ebitda': parse_value(data.get('EBITDA'), int),
+                'pe_ratio': parse_value(data.get('PERatio'), float),
+                'peg_ratio': parse_value(data.get('PEGRatio'), float),
+                'book_value': parse_value(data.get('BookValue'), float),
+                'dividend_per_share': parse_value(data.get('DividendPerShare'), float),
+                'dividend_yield': parse_value(data.get('DividendYield'), float),
+                'eps': parse_value(data.get('EPS'), float),
+                'revenue_per_share_ttm': parse_value(data.get('RevenuePerShareTTM'), float),
+                'profit_margin': parse_value(data.get('ProfitMargin'), float),
+                'operating_margin_ttm': parse_value(data.get('OperatingMarginTTM'), float),
+                'return_on_assets_ttm': parse_value(data.get('ReturnOnAssetsTTM'), float),
+                'return_on_equity_ttm': parse_value(data.get('ReturnOnEquityTTM'), float),
+                'revenue_ttm': parse_value(data.get('RevenueTTM'), int),
+                'gross_profit_ttm': parse_value(data.get('GrossProfitTTM'), int),
+                'quarterly_earnings_growth_yoy': parse_value(data.get('QuarterlyEarningsGrowthYOY'), float),
+                'quarterly_revenue_growth_yoy': parse_value(data.get('QuarterlyRevenueGrowthYOY'), float),
+                'analyst_target_price': parse_value(data.get('AnalystTargetPrice'), float),
+                'trailing_pe': parse_value(data.get('TrailingPE'), float),
+                'forward_pe': parse_value(data.get('ForwardPE'), float),
+                'price_to_sales_ratio_ttm': parse_value(data.get('PriceToSalesRatioTTM'), float),
+                'price_to_book_ratio': parse_value(data.get('PriceToBookRatio'), float),
+                'beta': parse_value(data.get('Beta'), float),
+                'week_52_high': parse_value(data.get('52WeekHigh'), float),
+                'week_52_low': parse_value(data.get('52WeekLow'), float),
+                'day_50_moving_average': parse_value(data.get('50DayMovingAverage'), float),
+                'day_200_moving_average': parse_value(data.get('200DayMovingAverage'), float),
+                'shares_outstanding': parse_value(data.get('SharesOutstanding'), int),
+                'shares_float': parse_value(data.get('SharesFloat'), int),
+                'percent_insiders': parse_value(data.get('PercentInsiders'), float),
+                'percent_institutions': parse_value(data.get('PercentInstitutions'), float),
+            }
+        )
+
+        return Response({
+            'symbol': stock.symbol,
+            'name': stock.name,
+            'overview': data,  # Return raw Alpha Vantage format for frontend
+            'cached': False
+        })
+
+    except Stock.DoesNotExist:
+        return Response(
+            {'error': f'Stock {symbol} not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error fetching overview: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+def get_news_sentiment(request, symbol):
+    """
+    Get news sentiment data for a stock from Alpha Vantage.
+    Query params: limit (default 20), time_from, time_to
+    """
+    import requests
+    import os
+
+    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    if not api_key:
+        return Response(
+            {'error': 'Alpha Vantage API key not configured'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    limit = request.GET.get('limit', '20')
+
+    # Build URL with optional time filters
+    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={symbol}&limit={limit}&apikey={api_key}'
+
+    time_from = request.GET.get('time_from')
+    time_to = request.GET.get('time_to')
+    if time_from:
+        url += f'&time_from={time_from}'
+    if time_to:
+        url += f'&time_to={time_to}'
+
+    try:
+        response = requests.get(url, timeout=30)
+        data = response.json()
+
+        if 'Error Message' in data:
+            return Response(
+                {'error': 'Failed to fetch news sentiment'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(data)
+
+    except Exception as e:
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+def get_intraday_stock_data(request, symbol):
+    """
+    Get intraday stock data for a single symbol.
+    Auto-fetches from Alpha Vantage if data is missing or stale.
+
+    Query params:
+    - interval: 1min, 5min, 15min, 30min, 60min (default: 5min)
+    - days: Number of days of data to return (default: 7)
+    - force: Force refresh from API (default: false)
+    """
+    from django.utils import timezone
+    from django.core.management import call_command
+    from io import StringIO
+    from .models import IntradayStock, IntradayStockPrice
+    import pytz
+
+    symbol = symbol.upper()
+    interval = request.GET.get('interval', '5min')
+    days = int(request.GET.get('days', 7))
+    force = request.GET.get('force', 'false').lower() == 'true'
+
+    # Validate interval
+    valid_intervals = ['1min', '5min', '15min', '30min', '60min']
+    if interval not in valid_intervals:
+        return Response(
+            {'error': f'Invalid interval. Must be one of: {valid_intervals}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Try to get intraday stock from database
+        stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+
+        # Check if data is stale (older than 15 minutes during market hours)
+        eastern = pytz.timezone('US/Eastern')
+        now_eastern = timezone.now().astimezone(eastern)
+        market_open = now_eastern.hour >= 9 and now_eastern.hour < 16
+        time_since_update = timezone.now() - stock.last_updated
+
+        # Refresh if forced, or if data is stale during market hours
+        should_refresh = force or (market_open and time_since_update > timedelta(minutes=15))
+
+        if should_refresh:
+            out = StringIO()
+            try:
+                call_command(
+                    'fetch_intraday_stocks',
+                    symbols=symbol,
+                    interval=interval,
+                    force=True,
+                    stdout=out
+                )
+                # Refresh stock object
+                stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+            except Exception as e:
+                # Continue with existing data if refresh fails
+                pass
+
+    except IntradayStock.DoesNotExist:
+        # Fetch from Alpha Vantage
+        out = StringIO()
+        try:
+            call_command(
+                'fetch_intraday_stocks',
+                symbols=symbol,
+                interval=interval,
+                force=True,
+                stdout=out
+            )
+            stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to fetch intraday data for {symbol}: {str(e)}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    # Get intraday prices for the requested time period
+    start_date = timezone.now() - timedelta(days=days)
+    prices = IntradayStockPrice.objects.using('intraday').filter(
+        stock=stock,
+        timestamp__gte=start_date
+    ).order_by('timestamp')
+
+    # Format response similar to Alpha Vantage API format
+    time_series = {}
+    eastern = pytz.timezone('US/Eastern')
+    for price in prices:
+        # Convert UTC timestamp to Eastern time for display
+        eastern_time = price.timestamp.astimezone(eastern)
+        timestamp_str = eastern_time.strftime('%Y-%m-%d %H:%M:%S')
+
+        time_series[timestamp_str] = {
+            '1. open': str(price.open_price),
+            '2. high': str(price.high_price),
+            '3. low': str(price.low_price),
+            '4. close': str(price.close_price),
+            '5. volume': str(price.volume)
+        }
+
+    response_data = {
+        'Meta Data': {
+            '1. Information': f'Intraday ({interval}) Prices (from database)',
+            '2. Symbol': stock.symbol,
+            '3. Last Refreshed': str(stock.last_updated),
+            '4. Interval': interval,
+            '5. Output Size': 'Full',
+            '6. Time Zone': 'US/Eastern'
+        },
+        f'Time Series ({interval})': time_series
+    }
+
+    return Response(response_data)
+
+
+@api_view(['GET'])
+def get_multiple_intraday_stocks(request):
+    """
+    Get intraday stock data for multiple symbols.
+
+    Query params:
+    - symbols: Comma-separated list of symbols
+    - interval: 1min, 5min, 15min, 30min, 60min (default: 5min)
+    - days: Number of days of data to return (default: 7)
+    """
+    from django.utils import timezone
+    from django.core.management import call_command
+    from io import StringIO
+    from .models import IntradayStock, IntradayStockPrice
+    import pytz
+
+    symbols = request.GET.get('symbols', '').split(',')
+    symbols = [s.strip().upper() for s in symbols if s.strip()]
+    interval = request.GET.get('interval', '5min')
+    days = int(request.GET.get('days', 7))
+
+    if not symbols:
+        return Response(
+            {'error': 'No symbols provided'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validate interval
+    valid_intervals = ['1min', '5min', '15min', '30min', '60min']
+    if interval not in valid_intervals:
+        return Response(
+            {'error': f'Invalid interval. Must be one of: {valid_intervals}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    results = {}
+    errors = []
+    missing_symbols = []
+    eastern = pytz.timezone('US/Eastern')
+
+    # First pass: check which stocks exist
+    for symbol in symbols:
+        try:
+            stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+
+            # Get intraday prices
+            start_date = timezone.now() - timedelta(days=days)
+            prices = IntradayStockPrice.objects.using('intraday').filter(
+                stock=stock,
+                timestamp__gte=start_date
+            ).order_by('timestamp')
+
+            time_series = {}
+            for price in prices:
+                eastern_time = price.timestamp.astimezone(eastern)
+                timestamp_str = eastern_time.strftime('%Y-%m-%d %H:%M:%S')
+
+                time_series[timestamp_str] = {
+                    '1. open': str(price.open_price),
+                    '2. high': str(price.high_price),
+                    '3. low': str(price.low_price),
+                    '4. close': str(price.close_price),
+                    '5. volume': str(price.volume)
+                }
+
+            results[symbol] = {
+                'Meta Data': {
+                    '1. Information': f'Intraday ({interval}) Prices (from database)',
+                    '2. Symbol': stock.symbol,
+                    '3. Last Refreshed': str(stock.last_updated),
+                    '4. Interval': interval,
+                },
+                f'Time Series ({interval})': time_series
+            }
+
+        except IntradayStock.DoesNotExist:
+            missing_symbols.append(symbol)
+
+    # Second pass: fetch missing stocks
+    if missing_symbols:
+        out = StringIO()
+        try:
+            call_command(
+                'fetch_intraday_stocks',
+                symbols=','.join(missing_symbols),
+                interval=interval,
+                force=True,
+                stdout=out
+            )
+
+            # Retrieve newly fetched stocks
+            for symbol in missing_symbols:
+                try:
+                    stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+
+                    start_date = timezone.now() - timedelta(days=days)
+                    prices = IntradayStockPrice.objects.using('intraday').filter(
+                        stock=stock,
+                        timestamp__gte=start_date
+                    ).order_by('timestamp')
+
+                    time_series = {}
+                    for price in prices:
+                        eastern_time = price.timestamp.astimezone(eastern)
+                        timestamp_str = eastern_time.strftime('%Y-%m-%d %H:%M:%S')
+
+                        time_series[timestamp_str] = {
+                            '1. open': str(price.open_price),
+                            '2. high': str(price.high_price),
+                            '3. low': str(price.low_price),
+                            '4. close': str(price.close_price),
+                            '5. volume': str(price.volume)
+                        }
+
+                    results[symbol] = {
+                        'Meta Data': {
+                            '1. Information': f'Intraday ({interval}) Prices (fetched from Alpha Vantage)',
+                            '2. Symbol': stock.symbol,
+                            '3. Last Refreshed': str(stock.last_updated),
+                            '4. Interval': interval,
+                        },
+                        f'Time Series ({interval})': time_series
+                    }
+
+                except IntradayStock.DoesNotExist:
+                    errors.append(f'{symbol}: Failed to fetch from Alpha Vantage')
+
+        except Exception as e:
+            for symbol in missing_symbols:
+                if symbol not in results:
+                    errors.append(f'{symbol}: {str(e)}')
+
+    return Response({
+        'data': results,
+        'errors': errors
+    })

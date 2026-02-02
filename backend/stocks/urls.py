@@ -6,9 +6,13 @@ urlpatterns = [
     path('stock/<str:symbol>/', views.get_stock_data, name='get_stock_data'),
     path('stock/<str:symbol>/adjusted/', views.get_adjusted_stock_data, name='get_adjusted_stock_data'),
     path('stock/<str:symbol>/weekly/', views.weekly_chart_data, name='weekly_chart_data'),
+    path('stock/<str:symbol>/overview/', views.get_stock_overview, name='get_stock_overview'),
+    path('stock/<str:symbol>/news/', views.get_news_sentiment, name='get_news_sentiment'),
+    path('stock/<str:symbol>/intraday/', views.get_intraday_stock_data, name='get_intraday_stock_data'),
 
     # Multiple stocks
     path('stocks/', views.get_multiple_stocks, name='get_multiple_stocks'),
+    path('stocks/intraday/', views.get_multiple_intraday_stocks, name='get_multiple_intraday_stocks'),
     path('stocks/list/', views.get_all_stocks_list, name='get_all_stocks_list'),
     path('stocks/summary/', views.get_stock_summary, name='get_stock_summary'),
     path('stocks/performance/', views.get_stock_performance, name='get_stock_performance'),

@@ -5,10 +5,13 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    height: 100%;
   }
 
   body {
     @apply antialiased;
+    min-height: 100%;
+    overflow-x: hidden;
   }
 }
 

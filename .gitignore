@@ -2,7 +2,7 @@
 
 # dependencies
 # Frontend
-frontend/node_modules/
+frontend/
 frontend/build/
 frontend/.cache/
 frontend/package-lock.json

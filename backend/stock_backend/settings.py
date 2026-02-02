@@ -117,7 +117,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'stock_backend.wsgi.application'
 
-# DUAL DATABASE SETUP - PostgreSQL
+# TRIPLE DATABASE SETUP - PostgreSQL
 DATABASES = {
     # Raw data database - stores untouched API data
     'default': {
@@ -132,7 +132,7 @@ DATABASES = {
         },
         'CONN_MAX_AGE': 600,  # Connection pooling
     },
-    # Adjusted data database - serves UI with adjusted prices
+    # Adjusted data database - serves UI with weekly adjusted prices
     'adjusted': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('ADJUSTED_DB_NAME', 'stocks_adjusted'),
@@ -140,6 +140,32 @@ DATABASES = {
         'PASSWORD': os.getenv('ADJUSTED_DB_PASSWORD', 'your_password_here'),
         'HOST': os.getenv('ADJUSTED_DB_HOST', 'localhost'),
         'PORT': os.getenv('ADJUSTED_DB_PORT', '5432'),
+        'OPTIONS': {
+            'connect_timeout': 10,
+        },
+        'CONN_MAX_AGE': 600,  # Connection pooling
+    },
+    # Daily data database - stores daily prices for short-term analysis
+    'daily': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DAILY_DB_NAME', 'stocks_daily'),
+        'USER': os.getenv('DAILY_DB_USER', 'stocks_user'),
+        'PASSWORD': os.getenv('DAILY_DB_PASSWORD', 'your_password_here'),
+        'HOST': os.getenv('DAILY_DB_HOST', 'localhost'),
+        'PORT': os.getenv('DAILY_DB_PORT', '5432'),
+        'OPTIONS': {
+            'connect_timeout': 10,
+        },
+        'CONN_MAX_AGE': 600,  # Connection pooling
+    },
+    # Intraday data database - stores intraday prices for 1D/1W charts
+    'intraday': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('INTRADAY_DB_NAME', 'stocks_intraday'),
+        'USER': os.getenv('INTRADAY_DB_USER', 'stocks_user'),
+        'PASSWORD': os.getenv('INTRADAY_DB_PASSWORD', 'your_password_here'),
+        'HOST': os.getenv('INTRADAY_DB_HOST', 'localhost'),
+        'PORT': os.getenv('INTRADAY_DB_PORT', '5432'),
         'OPTIONS': {
             'connect_timeout': 10,
         },

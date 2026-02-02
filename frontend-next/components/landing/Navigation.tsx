@@ -37,6 +37,9 @@ const Navigation = () => {
           <div className="hidden md:flex items-center gap-4">
             {status === 'authenticated' ? (
               <>
+                <span className="text-gray-700 font-medium">
+                  Hello, {session?.user?.name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'}
+                </span>
                 <Link href="/dashboard">
                   <Button variant="primary">Dashboard</Button>
                 </Link>
@@ -90,6 +93,9 @@ const Navigation = () => {
           <div className="md:hidden py-4 border-t border-gray-200 space-y-2">
             {status === 'authenticated' ? (
               <>
+                <div className="text-center py-2 text-gray-700 font-medium">
+                  Hello, {session?.user?.name?.split(' ')[0] || session?.user?.email?.split('@')[0] || 'User'}
+                </div>
                 <Link href="/dashboard" className="block">
                   <Button variant="primary" className="w-full">
                     Dashboard

@@ -1,14 +1,14 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from stocks.models import Stock, StockPrice, APICallLog
+from stocks.models import DailyStock, DailyStockPrice
 import requests
 import os
 from datetime import datetime, timedelta
-from .fortune500 import all_fortune_500
+from stocks.management.commands.fortune500 import all_fortune_500
 import time
 
 class Command(BaseCommand):
-    help = 'Fetch stock data from Alpha Vantage API and store in database'
+    help = 'Fetch daily stock data from Alpha Vantage API and store in daily database'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -52,14 +52,14 @@ class Command(BaseCommand):
 
         for index, symbol in enumerate(symbols, 1):
             symbol = symbol.strip().upper()
-            
+
             try:
                 # Check if we need to update
-                stock, created = Stock.objects.get_or_create(
+                stock, created = DailyStock.objects.using('daily').get_or_create(
                     symbol=symbol,
-                    defaults={'name': all_fortune_500.get(symbol, symbol)}  # Use all_fortune_500 here!
+                    defaults={'name': all_fortune_500.get(symbol, symbol)}
                 )
-                
+
                 # Skip if updated in last hour and not forced
                 if not force and not created:
                     time_diff = timezone.now() - stock.last_updated
@@ -70,83 +70,79 @@ class Command(BaseCommand):
                             )
                         )
                         continue
-                
-                self.stdout.write(f'[{index}/{len(symbols)}] Fetching {symbol}...')
-                
-                # Fetch from API
-                url = f'https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol={symbol}&apikey={api_key}'
-                response = requests.get(url, timeout=10)
+
+                self.stdout.write(f'[{index}/{len(symbols)}] Fetching daily data for {symbol}...')
+
+                # Fetch daily data from API
+                url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={symbol}&outputsize=full&apikey={api_key}'
+                response = requests.get(url, timeout=30)
                 data = response.json()
-                
+
                 # Check for errors
                 if 'Error Message' in data:
                     raise Exception(f'Invalid symbol: {symbol}')
-                
+
                 if 'Note' in data:
                     raise Exception('API rate limit reached')
-                
-                if 'Weekly Time Series' not in data:
+
+                # Check for the time series key
+                time_series_key = 'Time Series (Daily)'
+                if time_series_key not in data:
                     raise Exception('Unexpected API response format')
-                
+
                 # Parse and store data
-                time_series = data['Weekly Time Series']
+                time_series = data[time_series_key]
                 prices_created = 0
                 prices_updated = 0
-                
+
+                # Only store last 90 days of data to save space
+                ninety_days_ago = datetime.now().date() - timedelta(days=90)
+
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    
-                    price, created = StockPrice.objects.update_or_create(
+
+
+                    # Use adjusted close for daily data
+                    close_price = values.get('5. adjusted close', values.get('4. close'))
+
+                    price, created = DailyStockPrice.objects.using('daily').update_or_create(
                         stock=stock,
                         date=date,
                         defaults={
                             'open_price': values['1. open'],
                             'high_price': values['2. high'],
                             'low_price': values['3. low'],
-                            'close_price': values['4. close'],
-                            'volume': values['5. volume']
+                            'close_price': close_price,
+                            'volume': values['6. volume']
                         }
                     )
-                    
+
                     if created:
                         prices_created += 1
                     else:
                         prices_updated += 1
-                
+
                 # Update last_updated timestamp
-                stock.save()
-                
-                # Log success
-                APICallLog.objects.create(
-                    symbol=symbol,
-                    success=True
-                )
-                
+                stock.save(using='daily')
+
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f'[{index}/{len(symbols)}] {symbol}: ✓ Created {prices_created}, Updated {prices_updated} price records'
+                        f'[{index}/{len(symbols)}] {symbol}: ✓ Created {prices_created}, Updated {prices_updated} daily price records'
                     )
                 )
-                
+
                 # Add delay between calls
                 if index < len(symbols):
                     self.stdout.write(f'Waiting {delay}s before next call...')
                     time.sleep(delay)
-                
+
             except Exception as e:
-                # Log error
-                APICallLog.objects.create(
-                    symbol=symbol,
-                    success=False,
-                    error_message=str(e)
-                )
-                
                 self.stdout.write(
                     self.style.ERROR(f'[{index}/{len(symbols)}] {symbol}: ✗ {str(e)}')
                 )
-                
+
                 # Add delay even on error
                 if index < len(symbols):
                     time.sleep(delay)
-        
+
         self.stdout.write(self.style.SUCCESS('\nDone!'))
