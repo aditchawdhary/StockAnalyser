@@ -119,61 +119,54 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'stock_backend.wsgi.application'
 
-# TRIPLE DATABASE SETUP - PostgreSQL
-DATABASES = {
-    # Raw data database - stores untouched API data
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('RAW_DB_NAME', 'stocks_raw'),
-        'USER': os.getenv('RAW_DB_USER', 'stocks_user'),
-        'PASSWORD': os.getenv('RAW_DB_PASSWORD', 'your_password_here'),
-        'HOST': os.getenv('RAW_DB_HOST', 'localhost'),
-        'PORT': os.getenv('RAW_DB_PORT', '5432'),
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
-        'CONN_MAX_AGE': 600,  # Connection pooling
-    },
-    # Adjusted data database - serves UI with weekly adjusted prices
-    'adjusted': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('ADJUSTED_DB_NAME', 'stocks_adjusted'),
-        'USER': os.getenv('ADJUSTED_DB_USER', 'stocks_user'),
-        'PASSWORD': os.getenv('ADJUSTED_DB_PASSWORD', 'your_password_here'),
-        'HOST': os.getenv('ADJUSTED_DB_HOST', 'localhost'),
-        'PORT': os.getenv('ADJUSTED_DB_PORT', '5432'),
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
-        'CONN_MAX_AGE': 600,  # Connection pooling
-    },
-    # Daily data database - stores daily prices for short-term analysis
-    'daily': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DAILY_DB_NAME', 'stocks_daily'),
-        'USER': os.getenv('DAILY_DB_USER', 'stocks_user'),
-        'PASSWORD': os.getenv('DAILY_DB_PASSWORD', 'your_password_here'),
-        'HOST': os.getenv('DAILY_DB_HOST', 'localhost'),
-        'PORT': os.getenv('DAILY_DB_PORT', '5432'),
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
-        'CONN_MAX_AGE': 600,  # Connection pooling
-    },
-    # Intraday data database - stores intraday prices for 1D/1W charts
-    'intraday': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('INTRADAY_DB_NAME', 'stocks_intraday'),
-        'USER': os.getenv('INTRADAY_DB_USER', 'stocks_user'),
-        'PASSWORD': os.getenv('INTRADAY_DB_PASSWORD', 'your_password_here'),
-        'HOST': os.getenv('INTRADAY_DB_HOST', 'localhost'),
-        'PORT': os.getenv('INTRADAY_DB_PORT', '5432'),
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
-        'CONN_MAX_AGE': 600,  # Connection pooling
+# Database configuration - use DATABASE_URL if available (Railway), otherwise use local config
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if DATABASE_URL:
+    # Production: Use single database from Railway
+    DATABASES = {
+        'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600),
     }
-}
+    # Point all database aliases to the same database in production
+    DATABASES['adjusted'] = DATABASES['default']
+    DATABASES['daily'] = DATABASES['default']
+    DATABASES['intraday'] = DATABASES['default']
+else:
+    # Local development: Use multiple PostgreSQL databases
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('RAW_DB_NAME', 'stocks_raw'),
+            'USER': os.getenv('RAW_DB_USER', 'stocks_user'),
+            'PASSWORD': os.getenv('RAW_DB_PASSWORD', 'your_password_here'),
+            'HOST': os.getenv('RAW_DB_HOST', 'localhost'),
+            'PORT': os.getenv('RAW_DB_PORT', '5432'),
+        },
+        'adjusted': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('ADJUSTED_DB_NAME', 'stocks_adjusted'),
+            'USER': os.getenv('ADJUSTED_DB_USER', 'stocks_user'),
+            'PASSWORD': os.getenv('ADJUSTED_DB_PASSWORD', 'your_password_here'),
+            'HOST': os.getenv('ADJUSTED_DB_HOST', 'localhost'),
+            'PORT': os.getenv('ADJUSTED_DB_PORT', '5432'),
+        },
+        'daily': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DAILY_DB_NAME', 'stocks_daily'),
+            'USER': os.getenv('DAILY_DB_USER', 'stocks_user'),
+            'PASSWORD': os.getenv('DAILY_DB_PASSWORD', 'your_password_here'),
+            'HOST': os.getenv('DAILY_DB_HOST', 'localhost'),
+            'PORT': os.getenv('DAILY_DB_PORT', '5432'),
+        },
+        'intraday': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('INTRADAY_DB_NAME', 'stocks_intraday'),
+            'USER': os.getenv('INTRADAY_DB_USER', 'stocks_user'),
+            'PASSWORD': os.getenv('INTRADAY_DB_PASSWORD', 'your_password_here'),
+            'HOST': os.getenv('INTRADAY_DB_HOST', 'localhost'),
+            'PORT': os.getenv('INTRADAY_DB_PORT', '5432'),
+        }
+    }
 
 # Database router to separate raw and adjusted data
 DATABASE_ROUTERS = ['stocks.db_router.StockRouter']
