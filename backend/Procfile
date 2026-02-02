@@ -1,2 +1,1 @@
-web: gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT
-release: python manage.py migrate --run-syncdb
+web: python manage.py migrate --run-syncdb && python manage.py collectstatic --noinput && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT
