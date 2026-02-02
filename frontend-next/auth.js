@@ -1,6 +1,6 @@
 import NextAuth from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
-import AzureADProvider from "next-auth/providers/azure-ad"
+import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
 import CredentialsProvider from "next-auth/providers/credentials"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -9,7 +9,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     }),
-    AzureADProvider({
+    MicrosoftEntraID({
       clientId: process.env.MICROSOFT_CLIENT_ID,
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
       tenantId: process.env.MICROSOFT_TENANT_ID || "common",
@@ -47,7 +47,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async jwt({ token, account, user }) {
       // Initial sign in
       if (account) {
-        if (account.provider === 'google' || account.provider === 'azure-ad') {
+        if (account.provider === 'google' || account.provider === 'microsoft-entra-id') {
           // Exchange OAuth token for Django JWT
           try {
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/social/login/`, {
@@ -55,7 +55,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 access_token: account.access_token,
-                provider: account.provider === 'azure-ad' ? 'microsoft' : account.provider,
+                provider: account.provider === 'microsoft-entra-id' ? 'microsoft' : account.provider,
               }),
             })
 
