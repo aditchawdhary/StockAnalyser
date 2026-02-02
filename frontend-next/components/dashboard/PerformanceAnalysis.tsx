@@ -13,7 +13,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
   const [loadingStock, setLoadingStock] = useState<string | null>(null);
   const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
 
-  const BACKEND_URL = 'http://127.0.0.1:8000/api';
+  const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
 
   useEffect(() => {
     fetchPerformance();

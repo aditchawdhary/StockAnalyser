@@ -28,7 +28,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
 
-  const BACKEND_URL = 'http://127.0.0.1:8000/api';
+  const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
   const ALPHA_VANTAGE_API_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY || '';
   const HISTORY_STORAGE_KEY = 'stock_search_history';
 
