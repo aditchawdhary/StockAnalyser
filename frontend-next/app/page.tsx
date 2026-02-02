@@ -3,6 +3,7 @@ import Hero from '../components/landing/Hero';
 import Features from '../components/landing/Features';
 import CTASection from '../components/landing/CTASection';
 import Footer from '../components/landing/Footer';
+import { Analytics } from "@vercel/analytics/next"
 
 export default function Home() {
   return (
@@ -12,6 +13,7 @@ export default function Home() {
       <Features />
       <CTASection />
       <Footer />
+      <Analytics />
     </main>
   );
 }
