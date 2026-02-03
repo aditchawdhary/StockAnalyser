@@ -271,14 +271,14 @@ def refresh_stocks(request):
     """Trigger a manual refresh of stock data"""
     from django.core.management import call_command
     from io import StringIO
-    
+
     symbols = request.GET.get('symbols', '')
     force = request.GET.get('force', 'false').lower() == 'true'
     fetch_all = request.GET.get('all', 'false').lower() == 'true'
-    
+
     # Capture command output
     out = StringIO()
-    
+
     try:
         if fetch_all:
             call_command('fetch_weekly_stocks', all=True, force=force, stdout=out)
@@ -286,7 +286,7 @@ def refresh_stocks(request):
             call_command('fetch_weekly_stocks', symbols=symbols, force=force, stdout=out)
         else:
             call_command('fetch_weekly_stocks', force=force, stdout=out)
-            
+
         return Response({
             'message': 'Stock data refresh initiated',
             'output': out.getvalue()
@@ -296,6 +296,77 @@ def refresh_stocks(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET', 'POST'])
+def seed_all_stocks(request):
+    """
+    Trigger full database population (weekly, daily, intraday) for all S&P 500 stocks.
+    Runs in background thread to avoid request timeout.
+
+    Query params:
+    - key: Secret key for authorization (set SEED_SECRET_KEY env var)
+    - weekly: true/false (default: true)
+    - daily: true/false (default: true)
+    - intraday: true/false (default: true)
+    - delay: seconds between API calls (default: 1)
+    """
+    import os
+    import threading
+    from django.core.management import call_command
+
+    # Simple auth check
+    secret_key = os.getenv('SEED_SECRET_KEY', 'stockseed2024')
+    provided_key = request.GET.get('key') or request.data.get('key')
+
+    if provided_key != secret_key:
+        return Response(
+            {'error': 'Invalid or missing key'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get options
+    fetch_weekly = request.GET.get('weekly', 'true').lower() == 'true'
+    fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
+    fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
+    delay = int(request.GET.get('delay', 1))
+
+    def run_seed():
+        """Background task to fetch all stock data"""
+        try:
+            if fetch_weekly:
+                print("Starting weekly data fetch...", flush=True)
+                call_command('fetch_weekly_stocks', all=True, force=True, delay=delay)
+                print("Weekly data fetch complete!", flush=True)
+
+            if fetch_daily:
+                print("Starting daily data fetch...", flush=True)
+                call_command('fetch_daily_stocks', all=True, force=True, delay=delay)
+                print("Daily data fetch complete!", flush=True)
+
+            if fetch_intraday:
+                print("Starting intraday data fetch...", flush=True)
+                call_command('fetch_intraday_stocks', all=True, force=True, delay=delay)
+                print("Intraday data fetch complete!", flush=True)
+
+            print("=== ALL SEEDING COMPLETE ===", flush=True)
+        except Exception as e:
+            print(f"Seeding error: {e}", flush=True)
+
+    # Start background thread
+    thread = threading.Thread(target=run_seed, daemon=True)
+    thread.start()
+
+    return Response({
+        'message': 'Database seeding started in background',
+        'options': {
+            'weekly': fetch_weekly,
+            'daily': fetch_daily,
+            'intraday': fetch_intraday,
+            'delay': delay
+        },
+        'note': 'Check Railway logs for progress. This will take a while for 500+ stocks.'
+    })
 
 
 @api_view(['GET'])

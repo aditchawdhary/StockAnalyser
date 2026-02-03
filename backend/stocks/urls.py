@@ -27,4 +27,5 @@ urlpatterns = [
     # Admin functions
     path('refresh/', views.refresh_stocks, name='refresh_stocks'),
     path('stats/', views.stock_stats, name='stock_stats'),
+    path('seed/', views.seed_all_stocks, name='seed_all_stocks'),
 ]
