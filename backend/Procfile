@@ -1,1 +1,1 @@
-web: python manage.py migrate --database=default --run-syncdb && python manage.py migrate --database=adjusted --run-syncdb && python manage.py migrate --database=daily --run-syncdb && python manage.py migrate --database=intraday --run-syncdb && python manage.py collectstatic --noinput && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT
+web: python deploy.py && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT
