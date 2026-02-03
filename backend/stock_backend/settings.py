@@ -168,8 +168,9 @@ else:
         }
     }
 
-# Database router to separate raw and adjusted data
-DATABASE_ROUTERS = ['stocks.db_router.StockRouter']
+# Database router to separate raw and adjusted data (only used locally with multiple DBs)
+if not DATABASE_URL:
+    DATABASE_ROUTERS = ['stocks.db_router.StockRouter']
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
