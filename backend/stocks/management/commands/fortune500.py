@@ -501,4 +501,11 @@ all_fortune_500 = {
     "MTCH": "Match Group, Inc.",
     "DVA": "DaVita Inc.",
     "LW": "Lamb Weston Holdings, Inc.",
+    "ASML": "ASML Holding NV ADR",
+    "AZN": "AstraZeneca PLC",
+    "SHOP": "Shopify Inc",
+    "PDD": "PDD Holdings Inc.",
+    "ARM": "Arm Holdings plc",
+    "MELI": "MercadoLibre Inc.",
+    "TEAM": "Atlassian Corp Plc"
 }

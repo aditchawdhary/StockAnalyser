@@ -29,7 +29,6 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
 
   const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
-  const ALPHA_VANTAGE_API_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY || '';
   const HISTORY_STORAGE_KEY = 'stock_search_history';
 
   // Fetch all data on mount or when currentSymbol changes
@@ -71,8 +70,9 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
     const debounceTimer = setTimeout(async () => {
       setSearching(true);
       try {
+        // Use backend proxy to avoid exposing API key
         const response = await fetch(
-          `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${searchQuery}&apikey=${ALPHA_VANTAGE_API_KEY}`
+          `${BACKEND_URL}/search/?q=${encodeURIComponent(searchQuery)}`
         );
         const data = await response.json();
 
@@ -89,7 +89,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
     }, 300); // 300ms debounce delay
 
     return () => clearTimeout(debounceTimer);
-  }, [searchQuery, ALPHA_VANTAGE_API_KEY]);
+  }, [searchQuery, BACKEND_URL]);
 
   // Redraw chart when time range changes
   useEffect(() => {
@@ -157,8 +157,9 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
 
     setSearching(true);
     try {
+      // Use backend proxy to avoid exposing API key
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${searchQuery}&apikey=${ALPHA_VANTAGE_API_KEY}`
+        `${BACKEND_URL}/search/?q=${encodeURIComponent(searchQuery)}`
       );
       const data = await response.json();
 

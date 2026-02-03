@@ -5,4 +5,4 @@
 NIXPACKS_NO_MIGRATE = "1"
 
 [start]
-cmd = "python deploy.py && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT"
+cmd = "python deploy.py && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT --timeout 300 --workers 2"

@@ -102,25 +102,29 @@ def seed_initial_stocks():
 
     if stock_count == 0:
         print("Database is empty, seeding ALL S&P 500 stocks...", flush=True)
-        print("Using 1s delay (75 req/min plan)", flush=True)
+        print("Using FAST concurrent fetcher (70 QPM, 4 QPS, 5 workers)", flush=True)
+        print("Estimated time: ~20-25 minutes for all data types", flush=True)
 
         try:
-            # Fetch weekly data for all S&P 500 stocks
-            print("\n=== Fetching WEEKLY data ===", flush=True)
-            call_command('fetch_weekly_stocks', all=True, force=True, delay=1)
-
-            # Fetch daily data for all S&P 500 stocks
-            print("\n=== Fetching DAILY data ===", flush=True)
-            call_command('fetch_daily_stocks', all=True, force=True, delay=1)
-
-            # Fetch intraday data for all S&P 500 stocks
-            print("\n=== Fetching INTRADAY data ===", flush=True)
-            call_command('fetch_intraday_stocks', all=True, force=True, delay=1)
+            # Use the fast concurrent fetcher for all data types
+            call_command(
+                'fetch_stocks_fast',
+                all=True,
+                force=True,
+                weekly=True,
+                daily=True,
+                intraday=True,
+                workers=5,
+                qpm=70,
+                qps=4
+            )
 
             new_count = Stock.objects.count()
             print(f"\nSuccessfully seeded {new_count} stocks with weekly, daily, and intraday data!", flush=True)
         except Exception as e:
             print(f"Warning: Error seeding stocks: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
     else:
         print(f"Database already has {stock_count} stocks, skipping seed.", flush=True)
 

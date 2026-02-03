@@ -218,14 +218,19 @@ def get_multiple_stocks(request):
 
 @api_view(['GET'])
 def get_all_stocks_list(request):
-    """Get list of all available stocks (NEW)"""
-    
-    stocks = Stock.objects.all().values('symbol', 'name', 'last_updated').order_by('symbol')
-    
-    return Response({
-        'count': len(stocks),
-        'stocks': list(stocks)
-    })
+    """Get list of all available stocks"""
+    try:
+        stocks = Stock.objects.all().values('symbol', 'name', 'last_updated').order_by('symbol')
+        return Response({
+            'count': len(stocks),
+            'stocks': list(stocks)
+        })
+    except Exception as e:
+        return Response({
+            'count': 0,
+            'stocks': [],
+            'error': str(e)
+        })
 
 
 @api_view(['GET'])
@@ -302,6 +307,7 @@ def refresh_stocks(request):
 def seed_all_stocks(request):
     """
     Trigger full database population (weekly, daily, intraday) for all S&P 500 stocks.
+    Uses fast concurrent fetcher optimized for 75 QPM / 5 QPS plan.
     Runs in background thread to avoid request timeout.
 
     Query params:
@@ -309,7 +315,9 @@ def seed_all_stocks(request):
     - weekly: true/false (default: true)
     - daily: true/false (default: true)
     - intraday: true/false (default: true)
-    - delay: seconds between API calls (default: 1)
+    - workers: concurrent workers (default: 5)
+    - qpm: queries per minute limit (default: 70)
+    - qps: queries per second limit (default: 4)
     """
     import os
     import threading
@@ -329,43 +337,60 @@ def seed_all_stocks(request):
     fetch_weekly = request.GET.get('weekly', 'true').lower() == 'true'
     fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
     fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
-    delay = int(request.GET.get('delay', 1))
+    workers = int(request.GET.get('workers', 5))
+    qpm = int(request.GET.get('qpm', 70))
+    qps = int(request.GET.get('qps', 4))
 
     def run_seed():
-        """Background task to fetch all stock data"""
+        """Background task to fetch all stock data using fast concurrent fetcher"""
         try:
-            if fetch_weekly:
-                print("Starting weekly data fetch...", flush=True)
-                call_command('fetch_weekly_stocks', all=True, force=True, delay=delay)
-                print("Weekly data fetch complete!", flush=True)
+            print("=== STARTING FAST CONCURRENT SEED ===", flush=True)
+            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}", flush=True)
+            print(f"Rate limits: {qpm} QPM, {qps} QPS, {workers} workers", flush=True)
 
-            if fetch_daily:
-                print("Starting daily data fetch...", flush=True)
-                call_command('fetch_daily_stocks', all=True, force=True, delay=delay)
-                print("Daily data fetch complete!", flush=True)
-
-            if fetch_intraday:
-                print("Starting intraday data fetch...", flush=True)
-                call_command('fetch_intraday_stocks', all=True, force=True, delay=delay)
-                print("Intraday data fetch complete!", flush=True)
+            call_command(
+                'fetch_stocks_fast',
+                all=True,
+                force=True,
+                weekly=fetch_weekly,
+                daily=fetch_daily,
+                intraday=fetch_intraday,
+                workers=workers,
+                qpm=qpm,
+                qps=qps
+            )
 
             print("=== ALL SEEDING COMPLETE ===", flush=True)
         except Exception as e:
             print(f"Seeding error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     # Start background thread
     thread = threading.Thread(target=run_seed, daemon=True)
     thread.start()
 
+    # Calculate estimated time
+    num_stocks = 500  # Approximate S&P 500 count
+    data_types = sum([fetch_weekly, fetch_daily, fetch_intraday])
+    total_requests = num_stocks * data_types
+    estimated_minutes = total_requests / qpm
+
     return Response({
-        'message': 'Database seeding started in background',
+        'message': 'Database seeding started in background (FAST MODE)',
         'options': {
             'weekly': fetch_weekly,
             'daily': fetch_daily,
             'intraday': fetch_intraday,
-            'delay': delay
+            'workers': workers,
+            'qpm': qpm,
+            'qps': qps
         },
-        'note': 'Check Railway logs for progress. This will take a while for 500+ stocks.'
+        'estimate': {
+            'total_requests': total_requests,
+            'estimated_minutes': round(estimated_minutes, 1)
+        },
+        'note': 'Check Railway logs for progress. Using concurrent fetcher for faster execution.'
     })
 
 
@@ -391,7 +416,13 @@ def get_stock_performance(request):
     """Get top winners and losers for different time periods using daily or weekly data"""
     from django.db.models import Q
     from datetime import datetime, timedelta
-    from .models import DailyStock, DailyStockPrice
+
+    # Try to import daily models, but don't fail if not available
+    try:
+        from .models import DailyStock, DailyStockPrice
+        daily_available = DailyStock.objects.using('daily').exists()
+    except Exception:
+        daily_available = False
 
     # Define time periods
     now = datetime.now().date()
@@ -419,7 +450,8 @@ def get_stock_performance(request):
         stocks_performance = []
 
         # Use daily data for 1D and 1W, weekly data for other periods
-        use_daily_data = period_name in ['1D', '1W']
+        # But only if daily data is actually available
+        use_daily_data = period_name in ['1D', '1W'] and daily_available
 
         if use_daily_data:
             # Use daily database for short-term analysis
@@ -581,7 +613,16 @@ def sp500_top_performers(request):
 
 @api_view(['GET'])
 def search_stocks(request):
-    """Search for stocks by symbol or name"""
+    """
+    Search for stocks using Alpha Vantage SYMBOL_SEARCH API.
+    This proxies the request so the API key isn't exposed in the frontend.
+
+    Query params:
+    - q: Search query (required)
+    """
+    import requests
+    import os
+
     query = request.GET.get('q', '').strip()
 
     if not query:
@@ -590,17 +631,34 @@ def search_stocks(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Search by symbol or name (case-insensitive)
-    stocks = Stock.objects.filter(
-        models.Q(symbol__icontains=query) |
-        models.Q(name__icontains=query)
-    ).values('symbol', 'name', 'industry', 'sector', 'is_sp500', 'last_updated')[:50]
+    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    if not api_key:
+        return Response(
+            {'error': 'API key not configured'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
-    return Response({
-        'query': query,
-        'count': len(stocks),
-        'results': list(stocks)
-    })
+    try:
+        url = f'https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords={query}&apikey={api_key}'
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if 'bestMatches' in data:
+            return Response({
+                'query': query,
+                'bestMatches': data['bestMatches']
+            })
+        else:
+            return Response({
+                'query': query,
+                'bestMatches': [],
+                'note': data.get('Note', 'No results found')
+            })
+    except Exception as e:
+        return Response(
+            {'error': f'Search failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['GET'])

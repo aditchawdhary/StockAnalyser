@@ -39,7 +39,6 @@ export default function Dashboard() {
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
 
   const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
-  const ALPHA_VANTAGE_API_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY || '';
   const HISTORY_STORAGE_KEY = 'stock_search_history';
 
   const timeRanges: TimeRange[] = [
@@ -199,8 +198,9 @@ export default function Dashboard() {
 
     setSearching(true);
     try {
+      // Use backend proxy to avoid exposing API key
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(query)}&apikey=${ALPHA_VANTAGE_API_KEY}`
+        `${BACKEND_URL}/search/?q=${encodeURIComponent(query)}`
       );
       const data = await response.json();
 
