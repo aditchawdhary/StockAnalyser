@@ -4,7 +4,7 @@ Optimized for Alpha Vantage 75 QPM / 5 QPS plan.
 """
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db import transaction
+from django.db import transaction, close_old_connections
 from stocks.models import Stock, StockPrice, DailyStock, DailyStockPrice, IntradayStock, IntradayStockPrice, APICallLog
 import requests
 import os
@@ -96,8 +96,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--workers',
             type=int,
-            help='Number of concurrent workers (default: 15)',
-            default=15
+            help='Number of concurrent workers (default: 5)',
+            default=5
         )
         parser.add_argument(
             '--qpm',
@@ -214,6 +214,10 @@ class Command(BaseCommand):
                         self.style.ERROR(f"✗ {symbol} ({data_type}) - Exception: {str(e)}")
                     )
                 return (data_type, symbol, False, str(e))
+            finally:
+                # Release database connections back to the pool
+                # Critical for threaded Django to prevent connection exhaustion
+                close_old_connections()
 
         # Execute with thread pool
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -380,9 +384,10 @@ class Command(BaseCommand):
             if 'Note' in data:
                 return (False, 0, 'API rate limit hit')
 
-            time_series_key = 'Time Series (5min)'
-            if time_series_key not in data:
-                return (False, 0, f'Unexpected response: {list(data.keys())}')
+            # Find the time series key dynamically (handles 1min, 5min, 15min, 30min, 60min)
+            time_series_key = next((k for k in data.keys() if k.startswith('Time Series')), None)
+            if time_series_key is None:
+                return (False, 0, f'No time series in response: {list(data.keys())}')
 
             time_series = data[time_series_key]
 
