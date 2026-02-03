@@ -79,9 +79,51 @@ def main():
     print("Collecting static files...", flush=True)
     call_command('collectstatic', '--noinput')
 
+    # Seed initial stock data if database is empty
+    seed_initial_stocks()
+
     print("=" * 50, flush=True)
     print("DEPLOY.PY COMPLETED!", flush=True)
     print("=" * 50, flush=True)
+
+
+def seed_initial_stocks():
+    """Fetch all S&P 500 stock data (weekly, daily, intraday) if the database is empty."""
+    from stocks.models import Stock
+    import os
+
+    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    if not api_key:
+        print("WARNING: ALPHA_VANTAGE_API_KEY not set, skipping stock seed", flush=True)
+        return
+
+    stock_count = Stock.objects.count()
+    print(f"Current stock count: {stock_count}", flush=True)
+
+    if stock_count == 0:
+        print("Database is empty, seeding ALL S&P 500 stocks...", flush=True)
+        print("Using 1s delay (75 req/min plan)", flush=True)
+
+        try:
+            # Fetch weekly data for all S&P 500 stocks
+            print("\n=== Fetching WEEKLY data ===", flush=True)
+            call_command('fetch_weekly_stocks', all=True, force=True, delay=1)
+
+            # Fetch daily data for all S&P 500 stocks
+            print("\n=== Fetching DAILY data ===", flush=True)
+            call_command('fetch_daily_stocks', all=True, force=True, delay=1)
+
+            # Fetch intraday data for all S&P 500 stocks
+            print("\n=== Fetching INTRADAY data ===", flush=True)
+            call_command('fetch_intraday_stocks', all=True, force=True, delay=1)
+
+            new_count = Stock.objects.count()
+            print(f"\nSuccessfully seeded {new_count} stocks with weekly, daily, and intraday data!", flush=True)
+        except Exception as e:
+            print(f"Warning: Error seeding stocks: {e}", flush=True)
+    else:
+        print(f"Database already has {stock_count} stocks, skipping seed.", flush=True)
+
 
 if __name__ == '__main__':
     try:

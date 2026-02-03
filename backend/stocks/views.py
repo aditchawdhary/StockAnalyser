@@ -40,7 +40,7 @@ def get_stock_data(request, symbol):
         
     except Stock.DoesNotExist:
         return Response(
-            {'error': f'Stock {symbol} not found in database. Please run: python manage.py fetch_stocks'}, 
+            {'error': f'Stock {symbol} not found in database. Please run: python manage.py fetch_weekly_stocks'}, 
             status=status.HTTP_404_NOT_FOUND
         )
 
@@ -174,7 +174,7 @@ def get_multiple_stocks(request):
                     except DailyStock.DoesNotExist:
                         errors.append(f'{symbol}: Failed to fetch from Alpha Vantage')
             else:
-                call_command('fetch_stocks', symbols=','.join(missing_symbols), force=True, stdout=out)
+                call_command('fetch_weekly_stocks', symbols=','.join(missing_symbols), force=True, stdout=out)
 
                 # Try to retrieve the newly fetched stocks from weekly database
                 for symbol in missing_symbols:
@@ -281,11 +281,11 @@ def refresh_stocks(request):
     
     try:
         if fetch_all:
-            call_command('fetch_stocks', all=True, force=force, stdout=out)
+            call_command('fetch_weekly_stocks', all=True, force=force, stdout=out)
         elif symbols:
-            call_command('fetch_stocks', symbols=symbols, force=force, stdout=out)
+            call_command('fetch_weekly_stocks', symbols=symbols, force=force, stdout=out)
         else:
-            call_command('fetch_stocks', force=force, stdout=out)
+            call_command('fetch_weekly_stocks', force=force, stdout=out)
             
         return Response({
             'message': 'Stock data refresh initiated',
