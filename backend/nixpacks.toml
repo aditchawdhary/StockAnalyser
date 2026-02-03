@@ -1,0 +1,8 @@
+# Override nixpacks Django behavior
+# Set NIXPACKS_NO_MIGRATE to skip auto-migration during build
+
+[variables]
+NIXPACKS_NO_MIGRATE = "1"
+
+[start]
+cmd = "python deploy.py && gunicorn stock_backend.wsgi --bind 0.0.0.0:$PORT"
