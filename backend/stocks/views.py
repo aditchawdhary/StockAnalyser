@@ -315,7 +315,7 @@ def seed_all_stocks(request):
     - weekly: true/false (default: true)
     - daily: true/false (default: true)
     - intraday: true/false (default: true)
-    - workers: concurrent workers (default: 5)
+    - workers: concurrent workers (default: 15)
     - qpm: queries per minute limit (default: 70)
     - qps: queries per second limit (default: 4)
     """
@@ -337,7 +337,7 @@ def seed_all_stocks(request):
     fetch_weekly = request.GET.get('weekly', 'true').lower() == 'true'
     fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
     fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
-    workers = int(request.GET.get('workers', 5))
+    workers = int(request.GET.get('workers', 15))
     qpm = int(request.GET.get('qpm', 70))
     qps = int(request.GET.get('qps', 4))
 

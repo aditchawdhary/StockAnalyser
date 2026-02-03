@@ -14,6 +14,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import deque
+import pytz
 
 
 class RateLimiter:
@@ -95,8 +96,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--workers',
             type=int,
-            help='Number of concurrent workers (default: 5)',
-            default=5
+            help='Number of concurrent workers (default: 15)',
+            default=15
         )
         parser.add_argument(
             '--qpm',
@@ -167,51 +168,60 @@ class Command(BaseCommand):
 
         def fetch_task(task):
             data_type, symbol = task
+            task_start = time.time()
             try:
                 rate_limiter.acquire()
 
                 if data_type == 'weekly':
-                    success = self.fetch_weekly(symbol, api_key, force)
+                    success, records, error = self.fetch_weekly(symbol, api_key, force)
                 elif data_type == 'daily':
-                    success = self.fetch_daily(symbol, api_key, force)
+                    success, records, error = self.fetch_daily(symbol, api_key, force)
                 else:  # intraday
-                    success = self.fetch_intraday(symbol, api_key, force)
+                    success, records, error = self.fetch_intraday(symbol, api_key, force)
+
+                task_time = time.time() - task_start
 
                 with lock:
                     completed['count'] += 1
                     if success:
                         completed['success'] += 1
+                        self.stdout.write(
+                            f"✓ {symbol} ({data_type}) - {records} records in {task_time:.1f}s"
+                        )
                     else:
                         completed['failed'] += 1
+                        self.stdout.write(
+                            self.style.ERROR(f"✗ {symbol} ({data_type}) - {error}")
+                        )
 
-                    # Progress update every 10 tasks
-                    if completed['count'] % 10 == 0 or completed['count'] == total_tasks:
+                    # Progress summary every 20 tasks
+                    if completed['count'] % 20 == 0 or completed['count'] == total_tasks:
                         elapsed = time.time() - start_time
                         rate = completed['count'] / (elapsed / 60) if elapsed > 0 else 0
                         remaining = (total_tasks - completed['count']) / rate if rate > 0 else 0
-                        self.stdout.write(
-                            f"Progress: {completed['count']}/{total_tasks} "
+                        self.stdout.write(self.style.WARNING(
+                            f"\n--- Progress: {completed['count']}/{total_tasks} "
                             f"({completed['success']} ok, {completed['failed']} failed) "
-                            f"Rate: {rate:.1f}/min, ETA: {remaining:.1f}min"
-                        )
+                            f"Rate: {rate:.1f}/min, ETA: {remaining:.1f}min ---\n"
+                        ))
 
-                return (data_type, symbol, success, None)
+                return (data_type, symbol, success, error)
             except Exception as e:
                 with lock:
                     completed['count'] += 1
                     completed['failed'] += 1
+                    self.stdout.write(
+                        self.style.ERROR(f"✗ {symbol} ({data_type}) - Exception: {str(e)}")
+                    )
                 return (data_type, symbol, False, str(e))
 
         # Execute with thread pool
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(fetch_task, task) for task in tasks]
 
+            # Just wait for all to complete - logging happens in fetch_task
             for future in as_completed(futures):
-                result = future.result()
-                if result[3]:  # Has error
-                    self.stdout.write(
-                        self.style.ERROR(f'{result[0]} {result[1]}: {result[3]}')
-                    )
+                future.result()  # This raises any unhandled exceptions
 
         # Summary
         elapsed = time.time() - start_time
@@ -224,7 +234,9 @@ class Command(BaseCommand):
         ))
 
     def fetch_weekly(self, symbol, api_key, force):
-        """Fetch weekly data for a symbol."""
+        """Fetch weekly data for a symbol using bulk operations.
+        Returns: (success, records_count, error_message)
+        """
         try:
             stock, created = Stock.objects.get_or_create(
                 symbol=symbol,
@@ -234,49 +246,63 @@ class Command(BaseCommand):
             if not force and not created:
                 time_diff = timezone.now() - stock.last_updated
                 if time_diff < timedelta(hours=1):
-                    return True  # Skip, already recent
+                    return (True, 0, 'skipped (recent)')
 
             url = f'https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY_ADJUSTED&symbol={symbol}&apikey={api_key}'
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, timeout=30)
             data = response.json()
 
-            if 'Error Message' in data or 'Note' in data:
-                raise Exception(data.get('Error Message') or data.get('Note'))
+            if 'Error Message' in data:
+                error = data.get('Error Message', 'Unknown error')
+                APICallLog.objects.create(symbol=symbol, success=False, error_message=error)
+                return (False, 0, error)
+
+            if 'Note' in data:
+                error = data.get('Note', 'Rate limited')
+                APICallLog.objects.create(symbol=symbol, success=False, error_message=error)
+                return (False, 0, 'API rate limit hit')
 
             time_series_key = 'Weekly Adjusted Time Series' if 'Weekly Adjusted Time Series' in data else 'Weekly Time Series'
             if time_series_key not in data:
-                raise Exception('Unexpected response format')
+                APICallLog.objects.create(symbol=symbol, success=False, error_message='Unexpected format')
+                return (False, 0, f'Unexpected response: {list(data.keys())}')
 
             time_series = data[time_series_key]
 
+            # Delete existing prices and bulk insert new ones (much faster than update_or_create)
             with transaction.atomic():
+                StockPrice.objects.filter(stock=stock).delete()
+
+                prices_to_create = []
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
                     volume = values.get('6. volume') or values.get('5. volume')
                     close_price = values.get('5. adjusted close') or values.get('4. close')
 
-                    StockPrice.objects.update_or_create(
+                    prices_to_create.append(StockPrice(
                         stock=stock,
                         date=date,
-                        defaults={
-                            'open_price': values['1. open'],
-                            'high_price': values['2. high'],
-                            'low_price': values['3. low'],
-                            'close_price': close_price,
-                            'volume': volume
-                        }
-                    )
+                        open_price=values['1. open'],
+                        high_price=values['2. high'],
+                        low_price=values['3. low'],
+                        close_price=close_price,
+                        volume=volume
+                    ))
+
+                StockPrice.objects.bulk_create(prices_to_create, batch_size=500)
                 stock.save()
 
             APICallLog.objects.create(symbol=symbol, success=True)
-            return True
+            return (True, len(prices_to_create), None)
 
         except Exception as e:
             APICallLog.objects.create(symbol=symbol, success=False, error_message=str(e))
-            return False
+            return (False, 0, str(e))
 
     def fetch_daily(self, symbol, api_key, force):
-        """Fetch daily data for a symbol."""
+        """Fetch daily data for a symbol using bulk operations.
+        Returns: (success, records_count, error_message)
+        """
         try:
             stock, created = DailyStock.objects.using('daily').get_or_create(
                 symbol=symbol,
@@ -286,45 +312,53 @@ class Command(BaseCommand):
             if not force and not created:
                 time_diff = timezone.now() - stock.last_updated
                 if time_diff < timedelta(hours=1):
-                    return True
+                    return (True, 0, 'skipped (recent)')
 
             url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={symbol}&outputsize=full&apikey={api_key}'
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, timeout=30)
             data = response.json()
 
-            if 'Error Message' in data or 'Note' in data:
-                raise Exception(data.get('Error Message') or data.get('Note'))
+            if 'Error Message' in data:
+                return (False, 0, data.get('Error Message', 'Unknown error'))
+
+            if 'Note' in data:
+                return (False, 0, 'API rate limit hit')
 
             time_series_key = 'Time Series (Daily)'
             if time_series_key not in data:
-                raise Exception('Unexpected response format')
+                return (False, 0, f'Unexpected response: {list(data.keys())}')
 
             time_series = data[time_series_key]
 
+            # Delete existing and bulk insert (much faster)
             with transaction.atomic():
+                DailyStockPrice.objects.using('daily').filter(stock=stock).delete()
+
+                prices_to_create = []
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
-
-                    DailyStockPrice.objects.using('daily').update_or_create(
+                    prices_to_create.append(DailyStockPrice(
                         stock=stock,
                         date=date,
-                        defaults={
-                            'open_price': values['1. open'],
-                            'high_price': values['2. high'],
-                            'low_price': values['3. low'],
-                            'close_price': values.get('5. adjusted close', values['4. close']),
-                            'volume': values.get('6. volume', values.get('5. volume'))
-                        }
-                    )
+                        open_price=values['1. open'],
+                        high_price=values['2. high'],
+                        low_price=values['3. low'],
+                        close_price=values.get('5. adjusted close', values['4. close']),
+                        volume=values.get('6. volume', values.get('5. volume'))
+                    ))
+
+                DailyStockPrice.objects.using('daily').bulk_create(prices_to_create, batch_size=500)
                 stock.save(using='daily')
 
-            return True
+            return (True, len(prices_to_create), None)
 
         except Exception as e:
-            return False
+            return (False, 0, str(e))
 
     def fetch_intraday(self, symbol, api_key, force):
-        """Fetch intraday data for a symbol."""
+        """Fetch intraday data for a symbol using bulk operations.
+        Returns: (success, records_count, error_message)
+        """
         try:
             stock, created = IntradayStock.objects.using('intraday').get_or_create(
                 symbol=symbol,
@@ -334,39 +368,50 @@ class Command(BaseCommand):
             if not force and not created:
                 time_diff = timezone.now() - stock.last_updated
                 if time_diff < timedelta(minutes=30):
-                    return True
+                    return (True, 0, 'skipped (recent)')
 
             url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={api_key}'
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, timeout=30)
             data = response.json()
 
-            if 'Error Message' in data or 'Note' in data:
-                raise Exception(data.get('Error Message') or data.get('Note'))
+            if 'Error Message' in data:
+                return (False, 0, data.get('Error Message', 'Unknown error'))
+
+            if 'Note' in data:
+                return (False, 0, 'API rate limit hit')
 
             time_series_key = 'Time Series (5min)'
             if time_series_key not in data:
-                raise Exception('Unexpected response format')
+                return (False, 0, f'Unexpected response: {list(data.keys())}')
 
             time_series = data[time_series_key]
 
-            with transaction.atomic():
-                for timestamp_str, values in time_series.items():
-                    timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+            # Delete existing and bulk insert (much faster)
+            # Alpha Vantage returns timestamps in US Eastern time
+            eastern = pytz.timezone('US/Eastern')
 
-                    IntradayStockPrice.objects.using('intraday').update_or_create(
+            with transaction.atomic():
+                IntradayStockPrice.objects.using('intraday').filter(stock=stock).delete()
+
+                prices_to_create = []
+                for timestamp_str, values in time_series.items():
+                    naive_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+                    # Make timezone-aware (US Eastern) then convert to UTC
+                    aware_timestamp = eastern.localize(naive_timestamp)
+                    prices_to_create.append(IntradayStockPrice(
                         stock=stock,
-                        timestamp=timestamp,
-                        defaults={
-                            'open_price': values['1. open'],
-                            'high_price': values['2. high'],
-                            'low_price': values['3. low'],
-                            'close_price': values['4. close'],
-                            'volume': values['5. volume']
-                        }
-                    )
+                        timestamp=aware_timestamp,
+                        open_price=values['1. open'],
+                        high_price=values['2. high'],
+                        low_price=values['3. low'],
+                        close_price=values['4. close'],
+                        volume=values['5. volume']
+                    ))
+
+                IntradayStockPrice.objects.using('intraday').bulk_create(prices_to_create, batch_size=500)
                 stock.save(using='intraday')
 
-            return True
+            return (True, len(prices_to_create), None)
 
         except Exception as e:
-            return False
+            return (False, 0, str(e))
