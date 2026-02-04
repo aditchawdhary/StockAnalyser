@@ -1,12 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import useSWR from 'swr';
 import * as d3 from 'd3';
 import { PerformanceAnalysisProps, PerformanceResponse, StockPriceData, StockPrice } from '../../types';
+import { fetcher, SWR_KEYS } from '../../lib/swr';
 
 const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock }) => {
-  const [performance, setPerformance] = useState<PerformanceResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { data: performance, isLoading: loading } = useSWR<PerformanceResponse>(
+    SWR_KEYS.performance,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: 60000, // Dedupe requests within 1 minute
+    }
+  );
   const [selectedPeriod, setSelectedPeriod] = useState<'1D' | '1W' | '1M' | 'YTD' | '6M' | '1Y' | '5Y'>('1M');
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [stockData, setStockData] = useState<Record<string, { daily: StockPriceData; weekly: StockPriceData }>>({});
@@ -14,23 +23,6 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
   const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
 
   const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
-
-  useEffect(() => {
-    fetchPerformance();
-  }, []);
-
-  const fetchPerformance = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${BACKEND_URL}/stocks/performance/`);
-      const data = await response.json();
-      setPerformance(data);
-    } catch (err) {
-      console.error('Failed to fetch performance:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchStockData = async (symbol: string) => {
     if (stockData[symbol]) {

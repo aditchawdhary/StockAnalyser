@@ -7,6 +7,11 @@ import { useSession } from 'next-auth/react';
 import PerformanceAnalysis from '../../components/dashboard/PerformanceAnalysis';
 import StockInfoModal from '../../components/stock/StockInfoModal';
 import { Stock, StockPriceData, StockPrice, TimeRange } from '../../types';
+import { prefetchPerformance } from '../../lib/swr';
+
+// Prefetch performance data immediately when this module loads
+// This starts the fetch before the component even mounts
+prefetchPerformance();
 
 interface SearchResult {
   '1. symbol': string;
