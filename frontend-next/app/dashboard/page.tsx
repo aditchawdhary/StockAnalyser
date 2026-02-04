@@ -323,8 +323,17 @@ export default function Dashboard() {
   };
 
   const drawChart = (symbol: string, prices: StockPriceData, timeRange: string) => {
-    // Check for both daily and weekly time series
-    const timeSeriesKey = prices['Time Series (Daily)'] ? 'Time Series (Daily)' : 'Weekly Time Series';
+    // Check for intraday, daily, and weekly time series (in priority order)
+    const possibleKeys = [
+      'Time Series (5min)',
+      'Time Series (1min)',
+      'Time Series (15min)',
+      'Time Series (30min)',
+      'Time Series (60min)',
+      'Time Series (Daily)',
+      'Weekly Time Series'
+    ];
+    const timeSeriesKey = possibleKeys.find(key => prices[key]) || 'Weekly Time Series';
     if (!prices || !prices[timeSeriesKey]) return;
 
     const svgElement = svgRefs.current[symbol];
@@ -648,10 +657,14 @@ export default function Dashboard() {
               .text(`$${d.close.toFixed(2)}`)
               .style('opacity', 1);
 
-            const timeLabel = timeSeriesKey === 'Time Series (Daily)' ? 'Date' : 'Week of';
+            const isIntraday = timeSeriesKey.includes('min');
+            const timeLabel = isIntraday ? '' : (timeSeriesKey === 'Time Series (Daily)' ? 'Date' : 'Week of');
+            const dateDisplay = isIntraday
+              ? d.date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+              : d.date.toLocaleDateString();
             tooltip.transition().duration(100).style('opacity', 1);
             tooltip.html(`
-              <strong>${timeLabel} ${d.date.toLocaleDateString()}</strong><br/>
+              <strong>${timeLabel} ${dateDisplay}</strong><br/>
               <span style="color: ${lineColor};">●</span> Open: $${d.open.toFixed(2)}<br/>
               <span style="color: #16a34a;">●</span> High: $${d.high.toFixed(2)}<br/>
               <span style="color: #dc2626;">●</span> Low: $${d.low.toFixed(2)}<br/>
