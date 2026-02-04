@@ -101,18 +101,21 @@ class Command(BaseCommand):
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
 
-
-                    # Use adjusted close for daily data
-                    close_price = values.get('5. adjusted close', values.get('4. close'))
+                    # Calculate adjustment ratio for stock splits/dividends
+                    # Alpha Vantage only provides adjusted close, so we derive the ratio
+                    # and apply it to open/high/low for consistency
+                    raw_close = float(values['4. close'])
+                    adjusted_close = float(values.get('5. adjusted close', raw_close))
+                    adj_ratio = adjusted_close / raw_close if raw_close != 0 else 1
 
                     price, created = DailyStockPrice.objects.using('daily').update_or_create(
                         stock=stock,
                         date=date,
                         defaults={
-                            'open_price': values['1. open'],
-                            'high_price': values['2. high'],
-                            'low_price': values['3. low'],
-                            'close_price': close_price,
+                            'open_price': float(values['1. open']) * adj_ratio,
+                            'high_price': float(values['2. high']) * adj_ratio,
+                            'low_price': float(values['3. low']) * adj_ratio,
+                            'close_price': adjusted_close,
                             'volume': values['6. volume']
                         }
                     )

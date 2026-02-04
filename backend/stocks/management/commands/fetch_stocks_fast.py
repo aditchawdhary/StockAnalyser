@@ -281,15 +281,21 @@ class Command(BaseCommand):
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
                     volume = values.get('6. volume') or values.get('5. volume')
-                    close_price = values.get('5. adjusted close') or values.get('4. close')
+
+                    # Calculate adjustment ratio for stock splits/dividends
+                    # Alpha Vantage only provides adjusted close, so we derive the ratio
+                    # and apply it to open/high/low for consistency
+                    raw_close = float(values['4. close'])
+                    adjusted_close = float(values.get('5. adjusted close', raw_close))
+                    adj_ratio = adjusted_close / raw_close if raw_close != 0 else 1
 
                     prices_to_create.append(StockPrice(
                         stock=stock,
                         date=date,
-                        open_price=values['1. open'],
-                        high_price=values['2. high'],
-                        low_price=values['3. low'],
-                        close_price=close_price,
+                        open_price=float(values['1. open']) * adj_ratio,
+                        high_price=float(values['2. high']) * adj_ratio,
+                        low_price=float(values['3. low']) * adj_ratio,
+                        close_price=adjusted_close,
                         volume=volume
                     ))
 
@@ -341,13 +347,19 @@ class Command(BaseCommand):
                 prices_to_create = []
                 for date_str, values in time_series.items():
                     date = datetime.strptime(date_str, '%Y-%m-%d').date()
+
+                    # Calculate adjustment ratio for stock splits/dividends
+                    raw_close = float(values['4. close'])
+                    adjusted_close = float(values.get('5. adjusted close', raw_close))
+                    adj_ratio = adjusted_close / raw_close if raw_close != 0 else 1
+
                     prices_to_create.append(DailyStockPrice(
                         stock=stock,
                         date=date,
-                        open_price=values['1. open'],
-                        high_price=values['2. high'],
-                        low_price=values['3. low'],
-                        close_price=values.get('5. adjusted close', values['4. close']),
+                        open_price=float(values['1. open']) * adj_ratio,
+                        high_price=float(values['2. high']) * adj_ratio,
+                        low_price=float(values['3. low']) * adj_ratio,
+                        close_price=adjusted_close,
                         volume=values.get('6. volume', values.get('5. volume'))
                     ))
 
