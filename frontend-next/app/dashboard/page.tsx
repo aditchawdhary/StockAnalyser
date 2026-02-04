@@ -911,13 +911,19 @@ export default function Dashboard() {
                   key={symbol}
                   className="flex items-center gap-2 px-4 py-2 bg-teal-100 text-teal-900 rounded-full font-medium"
                 >
-                  <span>{symbol}</span>
-                  {stockInfo && (
-                    <span className="text-xs text-teal-700">({stockInfo.name.substring(0, 20)}...)</span>
-                  )}
+                  <button
+                    onClick={() => setInfoModalSymbol(symbol)}
+                    className="flex items-center gap-2 hover:text-teal-600 transition-colors cursor-pointer"
+                  >
+                    <span className="font-semibold">{symbol}</span>
+                    {stockInfo && (
+                      <span className="text-xs text-teal-700">({stockInfo.name.substring(0, 20)}...)</span>
+                    )}
+                  </button>
                   <button
                     onClick={() => toggleStock(symbol)}
                     className="ml-1 hover:bg-teal-200 rounded-full p-1 transition-colors"
+                    title="Remove from charts"
                   >
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                       <path
