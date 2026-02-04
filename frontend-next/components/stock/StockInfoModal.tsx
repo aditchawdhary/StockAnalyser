@@ -12,7 +12,7 @@ interface SearchResult {
   '8. currency': string;
 }
 
-const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose, onAddToCharts }) => {
+const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose, onAddToCharts, availableStocks = [] }) => {
   const [overview, setOverview] = useState<StockOverviewResponse | null>(null);
   const [news, setNews] = useState<NewsSentimentResponse | null>(null);
   const [priceData, setPriceData] = useState<{ daily: StockPriceData; weekly: StockPriceData; intraday: StockPriceData | null } | null>(null);
@@ -77,7 +77,12 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
         const data = await response.json();
 
         if (data.bestMatches) {
-          setSearchResults(data.bestMatches);
+          // Filter to only show stocks that exist in our database
+          const dbSymbols = new Set(availableStocks.map(s => s.symbol));
+          const filteredResults = availableStocks.length > 0
+            ? data.bestMatches.filter((match: SearchResult) => dbSymbols.has(match['1. symbol']))
+            : data.bestMatches;
+          setSearchResults(filteredResults);
           setShowResults(true);
           setHighlightedIndex(-1); // Reset highlight when new results come in
         }
@@ -164,7 +169,12 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
       const data = await response.json();
 
       if (data.bestMatches) {
-        setSearchResults(data.bestMatches);
+        // Filter to only show stocks that exist in our database
+        const dbSymbols = new Set(availableStocks.map(s => s.symbol));
+        const filteredResults = availableStocks.length > 0
+          ? data.bestMatches.filter((match: SearchResult) => dbSymbols.has(match['1. symbol']))
+          : data.bestMatches;
+        setSearchResults(filteredResults);
         setShowResults(true);
       }
     } catch (error) {
@@ -587,7 +597,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
               .attr('stroke', '#ddd');
 
             const infoX = (x1 + x2) / 2;
-            const infoY = -50;
+            const infoY = 20; // Position inside chart area, near top
 
             rangeInfo
               .attr('transform', `translate(${infoX - totalWidth / 2},${infoY})`)

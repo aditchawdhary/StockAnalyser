@@ -210,7 +210,12 @@ export default function Dashboard() {
       const data = await response.json();
 
       if (data.bestMatches) {
-        setSearchResults(data.bestMatches);
+        // Filter to only show stocks that exist in our database
+        const dbSymbols = new Set(allStocks.map(s => s.symbol));
+        const filteredResults = data.bestMatches.filter(
+          (match: SearchResult) => dbSymbols.has(match['1. symbol'])
+        );
+        setSearchResults(filteredResults);
         setShowResults(true);
       }
     } catch (err) {
@@ -641,7 +646,7 @@ export default function Dashboard() {
               .attr('stroke', '#ddd');
 
             const infoX = (x1 + x2) / 2;
-            const infoY = -50;
+            const infoY = 20; // Position inside chart area, near top
 
             rangeInfo
               .attr('transform', `translate(${infoX - totalWidth / 2},${infoY})`)
@@ -997,6 +1002,7 @@ export default function Dashboard() {
               addStockFromSearch(symbol);
               setInfoModalSymbol(null);
             }}
+            availableStocks={allStocks}
           />
         )}
       </div>

@@ -223,4 +223,5 @@ export interface StockInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddToCharts: (symbol: string) => void;
+  availableStocks?: Stock[];
 }
