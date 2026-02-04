@@ -412,6 +412,227 @@ def stock_stats(request):
 
 
 @api_view(['GET'])
+def get_data_freshness(request):
+    """
+    Get data freshness info for all databases (weekly, daily, intraday).
+
+    Query params:
+    - symbol: Optional stock symbol to get freshness for a specific stock
+    - all: If 'true', returns freshness for all stocks (daily database)
+    - db: Which database to query for all stocks ('daily', 'weekly', 'intraday'). Default: 'daily'
+    """
+    from .models import DailyStock, DailyStockPrice, IntradayStock, IntradayStockPrice
+    from django.utils import timezone
+    from django.db.models import OuterRef, Subquery
+
+    symbol = request.GET.get('symbol', '').upper()
+    list_all = request.GET.get('all', '').lower() == 'true'
+    db_type = request.GET.get('db', 'daily').lower()
+    result = {}
+
+    # List all stocks with their latest dates
+    if list_all:
+        stocks_data = []
+
+        if db_type == 'daily':
+            stocks = DailyStock.objects.using('daily').annotate(
+                latest_date=Max('daily_prices__date'),
+                oldest_date=Min('daily_prices__date'),
+                price_count=Count('daily_prices')
+            ).values('symbol', 'name', 'latest_date', 'oldest_date', 'price_count', 'last_updated').order_by('-latest_date')
+
+            for stock in stocks:
+                stocks_data.append({
+                    'symbol': stock['symbol'],
+                    'name': stock['name'],
+                    'latest_date': str(stock['latest_date']) if stock['latest_date'] else None,
+                    'oldest_date': str(stock['oldest_date']) if stock['oldest_date'] else None,
+                    'price_count': stock['price_count'],
+                    'last_updated': stock['last_updated'].isoformat() if stock['last_updated'] else None,
+                })
+
+        elif db_type == 'weekly':
+            stocks = Stock.objects.annotate(
+                latest_date=Max('prices__date'),
+                oldest_date=Min('prices__date'),
+                price_count=Count('prices')
+            ).values('symbol', 'name', 'latest_date', 'oldest_date', 'price_count', 'last_updated').order_by('-latest_date')
+
+            for stock in stocks:
+                stocks_data.append({
+                    'symbol': stock['symbol'],
+                    'name': stock['name'],
+                    'latest_date': str(stock['latest_date']) if stock['latest_date'] else None,
+                    'oldest_date': str(stock['oldest_date']) if stock['oldest_date'] else None,
+                    'price_count': stock['price_count'],
+                    'last_updated': stock['last_updated'].isoformat() if stock['last_updated'] else None,
+                })
+
+        elif db_type == 'intraday':
+            stocks = IntradayStock.objects.using('intraday').annotate(
+                latest_timestamp=Max('intraday_prices__timestamp'),
+                oldest_timestamp=Min('intraday_prices__timestamp'),
+                price_count=Count('intraday_prices')
+            ).values('symbol', 'name', 'latest_timestamp', 'oldest_timestamp', 'price_count', 'last_updated').order_by('-latest_timestamp')
+
+            for stock in stocks:
+                stocks_data.append({
+                    'symbol': stock['symbol'],
+                    'name': stock['name'],
+                    'latest_timestamp': stock['latest_timestamp'].isoformat() if stock['latest_timestamp'] else None,
+                    'oldest_timestamp': stock['oldest_timestamp'].isoformat() if stock['oldest_timestamp'] else None,
+                    'price_count': stock['price_count'],
+                    'last_updated': stock['last_updated'].isoformat() if stock['last_updated'] else None,
+                })
+
+        return Response({
+            'database': db_type,
+            'stock_count': len(stocks_data),
+            'stocks': stocks_data,
+            'server_time': timezone.now().isoformat()
+        })
+
+    # If symbol provided, get data for that specific stock
+    if symbol:
+        result['symbol'] = symbol
+
+        # Weekly data for symbol
+        try:
+            stock = Stock.objects.get(symbol=symbol)
+            prices = stock.prices.aggregate(
+                latest_date=Max('date'),
+                oldest_date=Min('date'),
+                price_count=Count('id')
+            )
+            result['weekly'] = {
+                'available': True,
+                'name': stock.name,
+                'price_count': prices['price_count'],
+                'latest_date': str(prices['latest_date']) if prices['latest_date'] else None,
+                'oldest_date': str(prices['oldest_date']) if prices['oldest_date'] else None,
+                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None,
+            }
+        except Stock.DoesNotExist:
+            result['weekly'] = {'available': False, 'error': 'Stock not found'}
+        except Exception as e:
+            result['weekly'] = {'available': False, 'error': str(e)}
+
+        # Daily data for symbol
+        try:
+            stock = DailyStock.objects.using('daily').get(symbol=symbol)
+            prices = DailyStockPrice.objects.using('daily').filter(stock=stock).aggregate(
+                latest_date=Max('date'),
+                oldest_date=Min('date'),
+                price_count=Count('id')
+            )
+            result['daily'] = {
+                'available': True,
+                'name': stock.name,
+                'price_count': prices['price_count'],
+                'latest_date': str(prices['latest_date']) if prices['latest_date'] else None,
+                'oldest_date': str(prices['oldest_date']) if prices['oldest_date'] else None,
+                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None,
+            }
+        except DailyStock.DoesNotExist:
+            result['daily'] = {'available': False, 'error': 'Stock not found in daily database'}
+        except Exception as e:
+            result['daily'] = {'available': False, 'error': str(e)}
+
+        # Intraday data for symbol
+        try:
+            stock = IntradayStock.objects.using('intraday').get(symbol=symbol)
+            prices = IntradayStockPrice.objects.using('intraday').filter(stock=stock).aggregate(
+                latest_timestamp=Max('timestamp'),
+                oldest_timestamp=Min('timestamp'),
+                price_count=Count('id')
+            )
+            result['intraday'] = {
+                'available': True,
+                'name': stock.name,
+                'price_count': prices['price_count'],
+                'latest_timestamp': prices['latest_timestamp'].isoformat() if prices['latest_timestamp'] else None,
+                'oldest_timestamp': prices['oldest_timestamp'].isoformat() if prices['oldest_timestamp'] else None,
+                'last_updated': stock.last_updated.isoformat() if stock.last_updated else None,
+            }
+        except IntradayStock.DoesNotExist:
+            result['intraday'] = {'available': False, 'error': 'Stock not found in intraday database'}
+        except Exception as e:
+            result['intraday'] = {'available': False, 'error': str(e)}
+
+        result['server_time'] = timezone.now().isoformat()
+        return Response(result)
+
+    # No symbol - return aggregate stats
+    # Weekly data (default database)
+    try:
+        weekly_latest = StockPrice.objects.aggregate(
+            latest_date=Max('date'),
+            oldest_date=Min('date')
+        )
+        weekly_stock_count = Stock.objects.count()
+        weekly_price_count = StockPrice.objects.count()
+        weekly_last_updated = Stock.objects.aggregate(latest=Max('last_updated'))['latest']
+
+        result['weekly'] = {
+            'available': True,
+            'stock_count': weekly_stock_count,
+            'price_count': weekly_price_count,
+            'latest_date': str(weekly_latest['latest_date']) if weekly_latest['latest_date'] else None,
+            'oldest_date': str(weekly_latest['oldest_date']) if weekly_latest['oldest_date'] else None,
+            'last_updated': weekly_last_updated.isoformat() if weekly_last_updated else None,
+        }
+    except Exception as e:
+        result['weekly'] = {'available': False, 'error': str(e)}
+
+    # Daily data
+    try:
+        daily_latest = DailyStockPrice.objects.using('daily').aggregate(
+            latest_date=Max('date'),
+            oldest_date=Min('date')
+        )
+        daily_stock_count = DailyStock.objects.using('daily').count()
+        daily_price_count = DailyStockPrice.objects.using('daily').count()
+        daily_last_updated = DailyStock.objects.using('daily').aggregate(latest=Max('last_updated'))['latest']
+
+        result['daily'] = {
+            'available': True,
+            'stock_count': daily_stock_count,
+            'price_count': daily_price_count,
+            'latest_date': str(daily_latest['latest_date']) if daily_latest['latest_date'] else None,
+            'oldest_date': str(daily_latest['oldest_date']) if daily_latest['oldest_date'] else None,
+            'last_updated': daily_last_updated.isoformat() if daily_last_updated else None,
+        }
+    except Exception as e:
+        result['daily'] = {'available': False, 'error': str(e)}
+
+    # Intraday data
+    try:
+        intraday_latest = IntradayStockPrice.objects.using('intraday').aggregate(
+            latest_timestamp=Max('timestamp'),
+            oldest_timestamp=Min('timestamp')
+        )
+        intraday_stock_count = IntradayStock.objects.using('intraday').count()
+        intraday_price_count = IntradayStockPrice.objects.using('intraday').count()
+        intraday_last_updated = IntradayStock.objects.using('intraday').aggregate(latest=Max('last_updated'))['latest']
+
+        result['intraday'] = {
+            'available': True,
+            'stock_count': intraday_stock_count,
+            'price_count': intraday_price_count,
+            'latest_timestamp': intraday_latest['latest_timestamp'].isoformat() if intraday_latest['latest_timestamp'] else None,
+            'oldest_timestamp': intraday_latest['oldest_timestamp'].isoformat() if intraday_latest['oldest_timestamp'] else None,
+            'last_updated': intraday_last_updated.isoformat() if intraday_last_updated else None,
+        }
+    except Exception as e:
+        result['intraday'] = {'available': False, 'error': str(e)}
+
+    # Add server time for reference
+    result['server_time'] = timezone.now().isoformat()
+
+    return Response(result)
+
+
+@api_view(['GET'])
 def get_stock_performance(request):
     """Get top winners and losers for different time periods using daily or weekly data"""
     from django.db.models import Q
