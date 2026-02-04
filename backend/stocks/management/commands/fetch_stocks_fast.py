@@ -111,6 +111,35 @@ class Command(BaseCommand):
             help='Queries per second limit (default: 4, leaving buffer)',
             default=4
         )
+        parser.add_argument(
+            '--retries',
+            type=int,
+            help='Number of retry rounds for failed tasks (default: 2)',
+            default=2
+        )
+        parser.add_argument(
+            '--retry-delay',
+            type=int,
+            help='Seconds to wait between retry rounds (default: 60)',
+            default=60
+        )
+
+    # Errors that should be retried (transient failures)
+    RETRIABLE_ERRORS = [
+        'rate limit',
+        'Rate limit',
+        'Information',
+        'timed out',
+        'timeout',
+        'ConnectionError',
+        'ConnectionPool',
+    ]
+
+    def is_retriable_error(self, error):
+        """Check if an error is transient and should be retried."""
+        if not error:
+            return False
+        return any(err in str(error) for err in self.RETRIABLE_ERRORS)
 
     def handle(self, *args, **options):
         api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
@@ -137,6 +166,8 @@ class Command(BaseCommand):
         workers = options['workers']
         qpm = options['qpm']
         qps = options['qps']
+        max_retries = options['retries']
+        retry_delay = options['retry_delay']
 
         # Create rate limiter
         rate_limiter = RateLimiter(qpm=qpm, qps=qps)
@@ -157,16 +188,18 @@ class Command(BaseCommand):
         ))
         self.stdout.write(f'Rate limits: {qpm} QPM, {qps} QPS')
         self.stdout.write(f'Workers: {workers}')
+        self.stdout.write(f'Retries: {max_retries} rounds (delay: {retry_delay}s)')
 
         estimated_time = total_tasks / qpm
         self.stdout.write(f'Estimated time: {estimated_time:.1f} minutes\n')
 
         # Track progress
         completed = {'count': 0, 'success': 0, 'failed': 0}
+        failed_tasks = []  # Collect failed tasks for retry
         lock = threading.Lock()
         start_time = time.time()
 
-        def fetch_task(task):
+        def fetch_task(task, current_total):
             data_type, symbol = task
             task_start = time.time()
             try:
@@ -193,49 +226,99 @@ class Command(BaseCommand):
                         self.stdout.write(
                             self.style.ERROR(f"✗ {symbol} ({data_type}) - {error}")
                         )
+                        # Track retriable failures
+                        if self.is_retriable_error(error):
+                            failed_tasks.append((data_type, symbol, error))
 
                     # Progress summary every 20 tasks
-                    if completed['count'] % 20 == 0 or completed['count'] == total_tasks:
+                    if completed['count'] % 20 == 0 or completed['count'] == current_total:
                         elapsed = time.time() - start_time
                         rate = completed['count'] / (elapsed / 60) if elapsed > 0 else 0
-                        remaining = (total_tasks - completed['count']) / rate if rate > 0 else 0
+                        remaining = (current_total - completed['count']) / rate if rate > 0 else 0
                         self.stdout.write(self.style.WARNING(
-                            f"\n--- Progress: {completed['count']}/{total_tasks} "
+                            f"\n--- Progress: {completed['count']}/{current_total} "
                             f"({completed['success']} ok, {completed['failed']} failed) "
                             f"Rate: {rate:.1f}/min, ETA: {remaining:.1f}min ---\n"
                         ))
 
                 return (data_type, symbol, success, error)
             except Exception as e:
+                error_str = str(e)
                 with lock:
                     completed['count'] += 1
                     completed['failed'] += 1
                     self.stdout.write(
-                        self.style.ERROR(f"✗ {symbol} ({data_type}) - Exception: {str(e)}")
+                        self.style.ERROR(f"✗ {symbol} ({data_type}) - Exception: {error_str}")
                     )
-                return (data_type, symbol, False, str(e))
+                    # Track retriable failures
+                    if self.is_retriable_error(error_str):
+                        failed_tasks.append((data_type, symbol, error_str))
+                return (data_type, symbol, False, error_str)
             finally:
                 # Release database connections back to the pool
                 # Critical for threaded Django to prevent connection exhaustion
                 close_old_connections()
 
-        # Execute with thread pool
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(fetch_task, task) for task in tasks]
+        def run_tasks(task_list, run_label=""):
+            """Execute a batch of tasks and return results."""
+            current_total = len(task_list)
+            if run_label:
+                self.stdout.write(self.style.WARNING(f"\n{run_label}"))
 
-            # Just wait for all to complete - logging happens in fetch_task
-            for future in as_completed(futures):
-                future.result()  # This raises any unhandled exceptions
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(fetch_task, task, current_total) for task in task_list]
+                for future in as_completed(futures):
+                    future.result()
+
+        # Main execution
+        run_tasks(tasks)
+
+        # Retry failed tasks
+        retry_round = 0
+        while failed_tasks and retry_round < max_retries:
+            retry_round += 1
+            retriable_count = len(failed_tasks)
+
+            self.stdout.write(self.style.WARNING(
+                f'\n=== RETRY ROUND {retry_round}/{max_retries} ===\n'
+                f'Retriable failures: {retriable_count}\n'
+                f'Waiting {retry_delay}s before retry...'
+            ))
+            time.sleep(retry_delay)
+
+            # Reset counters for this retry round
+            retry_tasks = [(dt, sym) for dt, sym, _ in failed_tasks]
+            failed_tasks.clear()
+            completed['count'] = 0
+            completed['failed'] = 0
+            retry_start_success = completed['success']
+
+            run_tasks(retry_tasks, f"Retrying {len(retry_tasks)} tasks...")
+
+            retry_success = completed['success'] - retry_start_success
+            self.stdout.write(self.style.WARNING(
+                f'\nRetry round {retry_round} complete: '
+                f'{retry_success}/{retriable_count} recovered'
+            ))
 
         # Summary
         elapsed = time.time() - start_time
+        final_failed = total_tasks - completed['success']
         self.stdout.write(self.style.SUCCESS(
             f'\n=== COMPLETE ===\n'
             f'Total time: {elapsed / 60:.1f} minutes\n'
             f'Success: {completed["success"]}/{total_tasks}\n'
-            f'Failed: {completed["failed"]}/{total_tasks}\n'
+            f'Failed: {final_failed}/{total_tasks}\n'
             f'Actual rate: {total_tasks / (elapsed / 60):.1f} requests/min'
         ))
+
+        # Report any remaining failures
+        if failed_tasks:
+            self.stdout.write(self.style.WARNING(
+                f'\nPermanent failures ({len(failed_tasks)}):'
+            ))
+            for data_type, symbol, error in failed_tasks[:10]:  # Show first 10
+                self.stdout.write(f'  - {symbol} ({data_type}): {error}')
 
     def fetch_weekly(self, symbol, api_key, force):
         """Fetch weekly data for a symbol using bulk operations.
