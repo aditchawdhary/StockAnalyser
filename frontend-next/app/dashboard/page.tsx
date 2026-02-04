@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import useSWR from 'swr';
 import * as d3 from 'd3';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import PerformanceAnalysis from '../../components/dashboard/PerformanceAnalysis';
 import StockInfoModal from '../../components/stock/StockInfoModal';
 import { Stock, StockPriceData, StockPrice, TimeRange } from '../../types';
-import { prefetchPerformance } from '../../lib/swr';
+import { prefetchAll, fetcher, SWR_KEYS } from '../../lib/swr';
 
-// Prefetch performance data immediately when this module loads
-// This starts the fetch before the component even mounts
-prefetchPerformance();
+// Prefetch all dashboard data immediately when this module loads
+prefetchAll();
 
 interface SearchResult {
   '1. symbol': string;
@@ -23,13 +23,7 @@ interface SearchResult {
 
 export default function Dashboard() {
   const { data: session } = useSession();
-  const [allStocks, setAllStocks] = useState<Stock[]>([]);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['NVDA', 'AAPL', 'MSFT', 'META', 'GOOGL', 'AMZN']);
-  const [allPrices, setAllPrices] = useState<Record<string, StockPriceData>>({});
-  const [dailyPrices, setDailyPrices] = useState<Record<string, StockPriceData>>({});
-  const [loading, setLoading] = useState<boolean>(false);
-  const [loadingList, setLoadingList] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const [chartTimeRanges, setChartTimeRanges] = useState<Record<string, string>>({});
   const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
   const chartCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -56,74 +50,55 @@ export default function Dashboard() {
     { label: 'MAX', weeks: 'max' as const }
   ];
 
-  // Fetch list of all available stocks
-  const fetchStocksList = async () => {
-    setLoadingList(true);
-    try {
-      const response = await fetch(`${BACKEND_URL}/stocks/list/`);
-      const data = await response.json();
-      setAllStocks(data.stocks || []);
-    } catch (err) {
-      console.error('Failed to fetch stocks list:', err);
-      setError('Failed to load stocks list: ' + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setLoadingList(false);
-    }
-  };
+  // Fetch stock list with SWR (benefits from prefetch cache)
+  const { data: stockListData, isLoading: loadingList } = useSWR<{ stocks: Stock[] }>(
+    SWR_KEYS.stockList,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const allStocks = stockListData?.stocks || [];
 
-  // Fetch price data for selected stocks
-  const fetchStockData = async () => {
-    if (selectedSymbols.length === 0) return;
+  // Fetch daily prices with SWR
+  const { data: dailyData, isLoading: loadingDaily, error: dailyError } = useSWR(
+    selectedSymbols.length > 0 ? SWR_KEYS.stockPrices(selectedSymbols, 'daily') : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const dailyPrices: Record<string, StockPriceData> = dailyData?.data || {};
 
-    setLoading(true);
-    setError(null);
+  // Fetch weekly prices with SWR
+  const { data: weeklyData, isLoading: loadingWeekly, error: weeklyError } = useSWR(
+    selectedSymbols.length > 0 ? SWR_KEYS.stockPrices(selectedSymbols, 'weekly') : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const allPrices: Record<string, StockPriceData> = weeklyData?.data || {};
 
-    try {
-      const symbols = selectedSymbols.join(',');
+  // Fetch intraday prices with SWR (for 1D and 1W views)
+  const { data: intradayData, isLoading: loadingIntraday, error: intradayError } = useSWR(
+    selectedSymbols.length > 0 ? SWR_KEYS.intradayPrices(selectedSymbols) : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const intradayPrices: Record<string, StockPriceData> = intradayData?.data || {};
 
-      // Fetch both daily and weekly data
-      const [dailyResponse, weeklyResponse] = await Promise.all([
-        fetch(`${BACKEND_URL}/stocks/?symbols=${symbols}&type=daily`),
-        fetch(`${BACKEND_URL}/stocks/?symbols=${symbols}&type=weekly`)
-      ]);
+  const loading = loadingDaily || loadingWeekly || loadingIntraday;
+  const error = dailyError || weeklyError || intradayError ? 'Failed to fetch stock data' : null;
 
-      const dailyResult = await dailyResponse.json();
-      const weeklyResult = await weeklyResponse.json();
-
-      if (dailyResult.data) {
-        setDailyPrices(dailyResult.data);
-      }
-
-      if (weeklyResult.data) {
-        setAllPrices(weeklyResult.data);
-
-        // Initialize time ranges for new stocks
-        const newRanges: Record<string, string> = {};
-        selectedSymbols.forEach(symbol => {
-          if (!chartTimeRanges[symbol]) {
-            newRanges[symbol] = '1Y';
-          }
-        });
-        if (Object.keys(newRanges).length > 0) {
-          setChartTimeRanges(prev => ({ ...prev, ...newRanges }));
-        }
-      }
-
-      const allErrors = [...(dailyResult.errors || []), ...(weeklyResult.errors || [])];
-      if (allErrors.length > 0) {
-        setError(allErrors.join('\n'));
-      }
-
-    } catch (err) {
-      setError('Failed to fetch data from backend: ' + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Initialize time ranges for stocks when weekly data loads
   useEffect(() => {
-    fetchStocksList();
-  }, []);
+    if (weeklyData?.data) {
+      const newRanges: Record<string, string> = {};
+      selectedSymbols.forEach(symbol => {
+        if (!chartTimeRanges[symbol]) {
+          newRanges[symbol] = '1Y';
+        }
+      });
+      if (Object.keys(newRanges).length > 0) {
+        setChartTimeRanges(prev => ({ ...prev, ...newRanges }));
+      }
+    }
+  }, [weeklyData, selectedSymbols]);
 
   // Load search history from localStorage on mount
   useEffect(() => {
@@ -137,26 +112,31 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => {
-    if (selectedSymbols.length > 0) {
-      fetchStockData();
-    }
-  }, [selectedSymbols]);
+  // SWR automatically refetches when selectedSymbols changes
 
   useEffect(() => {
     Object.keys(allPrices).forEach(symbol => {
       if (chartTimeRanges[symbol]) {
-        // Use daily data for short periods (1D, 1W, 1M, 6M, 1Y), weekly for long periods (5Y, MAX)
+        // Use intraday for 1D/1W, daily for 1M-1Y, weekly for 5Y/MAX
         const range = chartTimeRanges[symbol];
-        const useDailyData = ['1D', '1W', '1M', '6M', '1Y'].includes(range);
-        const priceData = useDailyData ? dailyPrices[symbol] : allPrices[symbol];
+        const useIntradayData = ['1D', '1W'].includes(range);
+        const useDailyData = ['1M', '6M', '1Y'].includes(range);
+
+        let priceData;
+        if (useIntradayData && intradayPrices[symbol]) {
+          priceData = intradayPrices[symbol];
+        } else if (useDailyData) {
+          priceData = dailyPrices[symbol];
+        } else {
+          priceData = allPrices[symbol];
+        }
 
         if (priceData) {
           drawChart(symbol, priceData, range);
         }
       }
     });
-  }, [allPrices, dailyPrices, chartTimeRanges]);
+  }, [allPrices, dailyPrices, intradayPrices, chartTimeRanges]);
 
   const toggleStock = (symbol: string) => {
     setSelectedSymbols(prev => {

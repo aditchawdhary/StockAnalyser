@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
-import { prefetchPerformance } from '../lib/swr';
+import { prefetchAll } from '../lib/swr';
 
 export default function Prefetch() {
   useEffect(() => {
-    // Start prefetching performance data as soon as landing page loads
-    prefetchPerformance();
+    // Start prefetching all dashboard data as soon as landing page loads
+    prefetchAll();
   }, []);
 
   return null;
