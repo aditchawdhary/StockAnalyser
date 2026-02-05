@@ -127,7 +127,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
         fetch(`${BACKEND_URL}/stock/${currentSymbol}/news/?limit=10`),
         fetch(`${BACKEND_URL}/stocks/?symbols=${currentSymbol}&type=daily`),
         fetch(`${BACKEND_URL}/stocks/?symbols=${currentSymbol}&type=weekly`),
-        fetch(`${BACKEND_URL}/stock/${currentSymbol}/intraday/?interval=5min&days=7`)
+        fetch(`${BACKEND_URL}/stock/${currentSymbol}/intraday/?interval=1min&days=7`)
       ]);
 
       const [overviewData, newsData, dailyData, weeklyData, intradayData] = await Promise.all([

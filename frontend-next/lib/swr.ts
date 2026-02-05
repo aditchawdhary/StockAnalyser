@@ -15,7 +15,7 @@ export const SWR_KEYS = {
   stockPrices: (symbols: string[], type: 'daily' | 'weekly') =>
     `${BACKEND_URL}/stocks/?symbols=${symbols.join(',')}&type=${type}`,
   intradayPrices: (symbols: string[]) =>
-    `${BACKEND_URL}/stocks/intraday/?symbols=${symbols.join(',')}&interval=5min&days=7`,
+    `${BACKEND_URL}/stocks/intraday/?symbols=${symbols.join(',')}&interval=1min&days=7`,
 } as const;
 
 // Prefetch function for performance data

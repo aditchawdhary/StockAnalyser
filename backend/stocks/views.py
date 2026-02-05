@@ -318,6 +318,7 @@ def seed_all_stocks(request):
     - workers: concurrent workers (default: 15)
     - qpm: queries per minute limit (default: 70)
     - qps: queries per second limit (default: 4)
+    - interval: intraday interval - 1min, 5min, 15min, 30min, 60min (default: 1min)
     """
     import os
     import threading
@@ -337,6 +338,7 @@ def seed_all_stocks(request):
     fetch_weekly = request.GET.get('weekly', 'true').lower() == 'true'
     fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
     fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
+    interval = request.GET.get('interval', '1min')
     workers = int(request.GET.get('workers', 15))
     qpm = int(request.GET.get('qpm', 70))
     qps = int(request.GET.get('qps', 4))
@@ -345,7 +347,7 @@ def seed_all_stocks(request):
         """Background task to fetch all stock data using fast concurrent fetcher"""
         try:
             print("=== STARTING FAST CONCURRENT SEED ===", flush=True)
-            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}", flush=True)
+            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}, interval={interval}", flush=True)
             print(f"Rate limits: {qpm} QPM, {qps} QPS, {workers} workers", flush=True)
 
             call_command(
@@ -355,6 +357,7 @@ def seed_all_stocks(request):
                 weekly=fetch_weekly,
                 daily=fetch_daily,
                 intraday=fetch_intraday,
+                interval=interval,
                 workers=workers,
                 qpm=qpm,
                 qps=qps
@@ -382,6 +385,7 @@ def seed_all_stocks(request):
             'weekly': fetch_weekly,
             'daily': fetch_daily,
             'intraday': fetch_intraday,
+            'interval': interval,
             'workers': workers,
             'qpm': qpm,
             'qps': qps

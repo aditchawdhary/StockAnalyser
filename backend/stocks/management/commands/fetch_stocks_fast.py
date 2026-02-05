@@ -94,6 +94,13 @@ class Command(BaseCommand):
             default=False
         )
         parser.add_argument(
+            '--interval',
+            type=str,
+            help='Intraday interval: 1min, 5min, 15min, 30min, 60min (default: 1min)',
+            default='1min',
+            choices=['1min', '5min', '15min', '30min', '60min']
+        )
+        parser.add_argument(
             '--workers',
             type=int,
             help='Number of concurrent workers (default: 5)',
@@ -168,6 +175,7 @@ class Command(BaseCommand):
         qps = options['qps']
         max_retries = options['retries']
         retry_delay = options['retry_delay']
+        interval = options['interval']
 
         # Create rate limiter
         rate_limiter = RateLimiter(qpm=qpm, qps=qps)
@@ -210,7 +218,7 @@ class Command(BaseCommand):
                 elif data_type == 'daily':
                     success, records, error = self.fetch_daily(symbol, api_key, force)
                 else:  # intraday
-                    success, records, error = self.fetch_intraday(symbol, api_key, force)
+                    success, records, error = self.fetch_intraday(symbol, api_key, force, interval)
 
                 task_time = time.time() - task_start
 
@@ -454,7 +462,7 @@ class Command(BaseCommand):
         except Exception as e:
             return (False, 0, str(e))
 
-    def fetch_intraday(self, symbol, api_key, force):
+    def fetch_intraday(self, symbol, api_key, force, interval='1min'):
         """Fetch intraday data for a symbol using bulk operations.
         Returns: (success, records_count, error_message)
         """
@@ -469,7 +477,7 @@ class Command(BaseCommand):
                 if time_diff < timedelta(minutes=30):
                     return (True, 0, 'skipped (recent)')
 
-            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={api_key}'
+            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={interval}&apikey={api_key}'
             response = requests.get(url, timeout=30)
             data = response.json()
 
