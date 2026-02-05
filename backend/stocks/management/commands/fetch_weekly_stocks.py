@@ -4,7 +4,7 @@ from stocks.models import Stock, StockPrice, APICallLog
 import requests
 import os
 from datetime import datetime, timedelta
-from .fortune500 import all_fortune_500
+from .top5kcompanies import all_5k_stocks
 import time
 
 class Command(BaseCommand):
@@ -47,7 +47,7 @@ class Command(BaseCommand):
             return
 
         if fetch_all:
-            symbols = list(all_fortune_500.keys())
+            symbols = list(all_5k_stocks.keys())
             self.stdout.write(self.style.WARNING(f'Fetching {len(symbols)} stocks with {delay}s delay between calls...'))
 
         for index, symbol in enumerate(symbols, 1):
@@ -57,7 +57,7 @@ class Command(BaseCommand):
                 # Check if we need to update
                 stock, created = Stock.objects.get_or_create(
                     symbol=symbol,
-                    defaults={'name': all_fortune_500.get(symbol, symbol)}  # Use all_fortune_500 here!
+                    defaults={'name': all_5k_stocks.get(symbol, symbol)}  # Use all_5k_stocks here!
                 )
                 
                 # Skip if updated in last hour and not forced

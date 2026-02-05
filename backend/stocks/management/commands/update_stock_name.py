@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from stocks.models import Stock
-from .fortune500 import all_fortune_500
+from .top5kcompanies import all_5k_stocks
 
 class Command(BaseCommand):
     help = 'Update stock names from fortune500 dictionary'
@@ -8,7 +8,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         updated = 0
         
-        for symbol, name in all_fortune_500.items():
+        for symbol, name in all_5k_stocks.items():
             try:
                 stock = Stock.objects.get(symbol=symbol)
                 if stock.name != name:

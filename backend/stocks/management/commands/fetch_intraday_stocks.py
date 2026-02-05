@@ -4,7 +4,7 @@ from stocks.models import IntradayStock, IntradayStockPrice
 import requests
 import os
 from datetime import datetime, timedelta
-from stocks.management.commands.fortune500 import all_fortune_500
+from stocks.management.commands.fortune500 import all_5k_stocks
 import time
 import pytz
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -78,7 +78,7 @@ class Command(BaseCommand):
             # Check if we need to update
             stock, created = IntradayStock.objects.using('intraday').get_or_create(
                 symbol=symbol,
-                defaults={'name': all_fortune_500.get(symbol, symbol)}
+                defaults={'name': all_5k_stocks.get(symbol, symbol)}
             )
 
             # Skip if updated in last 15 minutes and not forced
@@ -178,7 +178,7 @@ class Command(BaseCommand):
             return
 
         if fetch_all:
-            symbols = list(all_fortune_500.keys())
+            symbols = list(all_5k_stocks.keys())
 
         total = len(symbols)
         self.stdout.write(self.style.WARNING(

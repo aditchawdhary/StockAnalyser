@@ -9,7 +9,7 @@ from stocks.models import Stock, StockPrice, DailyStock, DailyStockPrice, Intrad
 import requests
 import os
 from datetime import datetime, timedelta
-from .fortune500 import all_fortune_500
+from .top5kcompanies import all_5k_stocks
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -149,7 +149,7 @@ class Command(BaseCommand):
 
         # Get symbols
         if options['all']:
-            symbols = list(all_fortune_500.keys())
+            symbols = list(all_5k_stocks.keys())
         else:
             symbols = [s.strip().upper() for s in options['symbols'].split(',')]
 
@@ -327,7 +327,7 @@ class Command(BaseCommand):
         try:
             stock, created = Stock.objects.get_or_create(
                 symbol=symbol,
-                defaults={'name': all_fortune_500.get(symbol, symbol)}
+                defaults={'name': all_5k_stocks.get(symbol, symbol)}
             )
 
             if not force and not created:
@@ -399,7 +399,7 @@ class Command(BaseCommand):
         try:
             stock, created = DailyStock.objects.using('daily').get_or_create(
                 symbol=symbol,
-                defaults={'name': all_fortune_500.get(symbol, symbol)}
+                defaults={'name': all_5k_stocks.get(symbol, symbol)}
             )
 
             if not force and not created:
@@ -461,7 +461,7 @@ class Command(BaseCommand):
         try:
             stock, created = IntradayStock.objects.using('intraday').get_or_create(
                 symbol=symbol,
-                defaults={'name': all_fortune_500.get(symbol, symbol)}
+                defaults={'name': all_5k_stocks.get(symbol, symbol)}
             )
 
             if not force and not created:
