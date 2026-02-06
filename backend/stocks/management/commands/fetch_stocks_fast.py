@@ -5,7 +5,7 @@ Optimized for Alpha Vantage 75 QPM / 5 QPS plan.
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import transaction, close_old_connections
-from stocks.models import Stock, StockPrice, DailyStock, DailyStockPrice, IntradayStock, IntradayStockPrice, APICallLog
+from stocks.models import Stock, StockPrice, DailyStock, DailyStockPrice, IntradayStock, IntradayStockPrice, StockOverview, APICallLog
 import requests
 import os
 from datetime import datetime, timedelta
@@ -94,6 +94,12 @@ class Command(BaseCommand):
             default=False
         )
         parser.add_argument(
+            '--overview',
+            action='store_true',
+            help='Fetch company overview data',
+            default=False
+        )
+        parser.add_argument(
             '--interval',
             type=str,
             help='Intraday interval: 1min, 5min, 15min, 30min, 60min (default: 1min)',
@@ -164,9 +170,10 @@ class Command(BaseCommand):
         fetch_weekly = options['weekly']
         fetch_daily = options['daily']
         fetch_intraday = options['intraday']
+        fetch_overview = options['overview']
 
-        # If none specified, fetch all
-        if not any([fetch_weekly, fetch_daily, fetch_intraday]):
+        # If none specified, fetch price data types (not overview, as it's 5k+ extra API calls)
+        if not any([fetch_weekly, fetch_daily, fetch_intraday, fetch_overview]):
             fetch_weekly = fetch_daily = fetch_intraday = True
 
         force = options['force']
@@ -189,6 +196,8 @@ class Command(BaseCommand):
                 tasks.append(('daily', symbol))
             if fetch_intraday:
                 tasks.append(('intraday', symbol))
+            if fetch_overview:
+                tasks.append(('overview', symbol))
 
         total_tasks = len(tasks)
         self.stdout.write(self.style.WARNING(
@@ -217,8 +226,10 @@ class Command(BaseCommand):
                     success, records, error = self.fetch_weekly(symbol, api_key, force)
                 elif data_type == 'daily':
                     success, records, error = self.fetch_daily(symbol, api_key, force)
-                else:  # intraday
+                elif data_type == 'intraday':
                     success, records, error = self.fetch_intraday(symbol, api_key, force, interval)
+                else:  # overview
+                    success, records, error = self.fetch_overview(symbol, api_key, force)
 
                 task_time = time.time() - task_start
 
@@ -522,4 +533,133 @@ class Command(BaseCommand):
             return (True, len(prices_to_create), None)
 
         except Exception as e:
+            return (False, 0, str(e))
+
+    def fetch_overview(self, symbol, api_key, force):
+        """Fetch company overview data for a symbol.
+        Returns: (success, records_count, error_message)
+        """
+        def parse_value(value, parser=str):
+            """Safely parse a value, returning None for invalid/empty values."""
+            if value in ['None', 'N/A', '', '-', None]:
+                return None
+            try:
+                return parser(value)
+            except (ValueError, TypeError):
+                return None
+
+        try:
+            # Get or create the Stock object in the 'adjusted' database
+            stock, created = Stock.objects.get_or_create(
+                symbol=symbol,
+                defaults={'name': all_5k_stocks.get(symbol, symbol)}
+            )
+
+            # Check if we have recent overview data (within 48 hours)
+            if not force:
+                try:
+                    overview = stock.overview
+                    time_diff = timezone.now() - overview.last_updated
+                    if time_diff < timedelta(hours=48):
+                        return (True, 0, 'skipped (recent)')
+                except StockOverview.DoesNotExist:
+                    pass
+
+            # Fetch from Alpha Vantage
+            url = f'https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={api_key}'
+            response = requests.get(url, timeout=30)
+            data = response.json()
+
+            # Check for API errors
+            if 'Error Message' in data:
+                return (False, 0, data.get('Error Message', 'Unknown error'))
+
+            if 'Note' in data:
+                return (False, 0, 'API rate limit hit')
+
+            # Check if valid response (must have Symbol field)
+            if not data or not data.get('Symbol'):
+                return (False, 0, f'Invalid response: no Symbol field')
+
+            # Helper to parse dates
+            def parse_date(value):
+                if value in ['None', 'N/A', '', '-', None]:
+                    return None
+                try:
+                    return datetime.strptime(value, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    return None
+
+            # Create or update StockOverview
+            StockOverview.objects.update_or_create(
+                stock=stock,
+                defaults={
+                    # Company Info
+                    'asset_type': data.get('AssetType', ''),
+                    'exchange': data.get('Exchange', ''),
+                    'currency': data.get('Currency', ''),
+                    'country': data.get('Country', ''),
+                    'sector': data.get('Sector', ''),
+                    'industry': data.get('Industry', ''),
+                    'description': data.get('Description', ''),
+                    'address': data.get('Address', ''),
+                    'official_site': data.get('OfficialSite', ''),
+                    'cik': data.get('CIK', ''),
+                    'fiscal_year_end': data.get('FiscalYearEnd', ''),
+                    'latest_quarter': parse_date(data.get('LatestQuarter')),
+                    # Key Metrics
+                    'market_capitalization': parse_value(data.get('MarketCapitalization'), int),
+                    'ebitda': parse_value(data.get('EBITDA'), int),
+                    'pe_ratio': parse_value(data.get('PERatio'), float),
+                    'peg_ratio': parse_value(data.get('PEGRatio'), float),
+                    'book_value': parse_value(data.get('BookValue'), float),
+                    'dividend_per_share': parse_value(data.get('DividendPerShare'), float),
+                    'dividend_yield': parse_value(data.get('DividendYield'), float),
+                    'eps': parse_value(data.get('EPS'), float),
+                    'diluted_eps_ttm': parse_value(data.get('DilutedEPSTTM'), float),
+                    # Financial Metrics
+                    'revenue_per_share_ttm': parse_value(data.get('RevenuePerShareTTM'), float),
+                    'profit_margin': parse_value(data.get('ProfitMargin'), float),
+                    'operating_margin_ttm': parse_value(data.get('OperatingMarginTTM'), float),
+                    'return_on_assets_ttm': parse_value(data.get('ReturnOnAssetsTTM'), float),
+                    'return_on_equity_ttm': parse_value(data.get('ReturnOnEquityTTM'), float),
+                    'revenue_ttm': parse_value(data.get('RevenueTTM'), int),
+                    'gross_profit_ttm': parse_value(data.get('GrossProfitTTM'), int),
+                    # Growth & Analyst Data
+                    'quarterly_earnings_growth_yoy': parse_value(data.get('QuarterlyEarningsGrowthYOY'), float),
+                    'quarterly_revenue_growth_yoy': parse_value(data.get('QuarterlyRevenueGrowthYOY'), float),
+                    'analyst_target_price': parse_value(data.get('AnalystTargetPrice'), float),
+                    'analyst_rating_strong_buy': parse_value(data.get('AnalystRatingStrongBuy'), int),
+                    'analyst_rating_buy': parse_value(data.get('AnalystRatingBuy'), int),
+                    'analyst_rating_hold': parse_value(data.get('AnalystRatingHold'), int),
+                    'analyst_rating_sell': parse_value(data.get('AnalystRatingSell'), int),
+                    'analyst_rating_strong_sell': parse_value(data.get('AnalystRatingStrongSell'), int),
+                    'trailing_pe': parse_value(data.get('TrailingPE'), float),
+                    'forward_pe': parse_value(data.get('ForwardPE'), float),
+                    # Trading Metrics
+                    'price_to_sales_ratio_ttm': parse_value(data.get('PriceToSalesRatioTTM'), float),
+                    'price_to_book_ratio': parse_value(data.get('PriceToBookRatio'), float),
+                    'ev_to_revenue': parse_value(data.get('EVToRevenue'), float),
+                    'ev_to_ebitda': parse_value(data.get('EVToEBITDA'), float),
+                    'beta': parse_value(data.get('Beta'), float),
+                    'week_52_high': parse_value(data.get('52WeekHigh'), float),
+                    'week_52_low': parse_value(data.get('52WeekLow'), float),
+                    'day_50_moving_average': parse_value(data.get('50DayMovingAverage'), float),
+                    'day_200_moving_average': parse_value(data.get('200DayMovingAverage'), float),
+                    # Share Data
+                    'shares_outstanding': parse_value(data.get('SharesOutstanding'), int),
+                    'shares_float': parse_value(data.get('SharesFloat'), int),
+                    'percent_insiders': parse_value(data.get('PercentInsiders'), float),
+                    'percent_institutions': parse_value(data.get('PercentInstitutions'), float),
+                    # Dividend Dates
+                    'dividend_date': parse_date(data.get('DividendDate')),
+                    'ex_dividend_date': parse_date(data.get('ExDividendDate')),
+                }
+            )
+
+            APICallLog.objects.create(symbol=symbol, success=True)
+            return (True, 1, None)
+
+        except Exception as e:
+            APICallLog.objects.create(symbol=symbol, success=False, error_message=str(e))
             return (False, 0, str(e))

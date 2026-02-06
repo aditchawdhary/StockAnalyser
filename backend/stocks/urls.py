@@ -29,4 +29,5 @@ urlpatterns = [
     path('stats/', views.stock_stats, name='stock_stats'),
     path('seed/', views.seed_all_stocks, name='seed_all_stocks'),
     path('freshness/', views.get_data_freshness, name='get_data_freshness'),
+    path('compute-performance/', views.compute_performance_metrics, name='compute_performance_metrics'),
 ]

@@ -51,6 +51,8 @@ export interface StockPriceData {
 export interface StockPerformance {
   symbol: string;
   name: string;
+  sector: string;
+  industry: string;
   start_price: number;
   end_price: number;
   percent_change: number;
@@ -64,6 +66,15 @@ export interface PerformanceData {
   top_losers: StockPerformance[];
 }
 
+export interface PerformanceFilters {
+  available_sectors: string[];
+  available_industries: string[];
+  applied: {
+    sector: string | null;
+    industry: string | null;
+  };
+}
+
 export interface PerformanceResponse {
   '1D': PerformanceData;
   '1W': PerformanceData;
@@ -72,6 +83,7 @@ export interface PerformanceResponse {
   '6M': PerformanceData;
   '1Y': PerformanceData;
   '5Y': PerformanceData;
+  filters: PerformanceFilters;
 }
 
 // Component prop types

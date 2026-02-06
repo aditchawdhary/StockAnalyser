@@ -4,11 +4,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import * as d3 from 'd3';
 import { PerformanceAnalysisProps, PerformanceResponse, StockPriceData, StockPrice } from '../../types';
-import { fetcher, SWR_KEYS } from '../../lib/swr';
+import { fetcher } from '../../lib/swr';
+
+const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
 
 const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock }) => {
+  const [selectedSector, setSelectedSector] = useState<string>('');
+  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
+
+  // Build URL with filters
+  const buildPerformanceUrl = () => {
+    const params = new URLSearchParams();
+    if (selectedSector) params.append('sector', selectedSector);
+    if (selectedIndustry) params.append('industry', selectedIndustry);
+    const queryString = params.toString();
+    return `${BACKEND_URL}/stocks/performance/${queryString ? `?${queryString}` : ''}`;
+  };
+
   const { data: performance, isLoading: loading } = useSWR<PerformanceResponse>(
-    SWR_KEYS.performance,
+    buildPerformanceUrl(),
     fetcher,
     {
       revalidateOnFocus: false,
@@ -21,8 +35,6 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
   const [stockData, setStockData] = useState<Record<string, { daily: StockPriceData; weekly: StockPriceData }>>({});
   const [loadingStock, setLoadingStock] = useState<string | null>(null);
   const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
-
-  const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
 
   const fetchStockData = async (symbol: string) => {
     if (stockData[symbol]) {
@@ -238,11 +250,66 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
 
   const currentData = performance[selectedPeriod];
 
+  // Get available filters from the response
+  const availableSectors = performance?.filters?.available_sectors || [];
+  const availableIndustries = performance?.filters?.available_industries || [];
+
+  // Show all industries (API handles the actual filtering)
+  const filteredIndustries = availableIndustries;
+
+  const clearFilters = () => {
+    setSelectedSector('');
+    setSelectedIndustry('');
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md p-6 mb-8">
       <h2 className="text-2xl font-bold mb-4">
-        📊 Performance Analysis for S&P 500
+        📊 Performance Analysis {selectedSector || selectedIndustry ? `- ${selectedSector || selectedIndustry}` : 'for Fortune 500'}
       </h2>
+
+      {/* Sector/Industry Filters */}
+      <div className="flex flex-wrap gap-4 mb-4 items-center justify-center">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700">Sector:</label>
+          <select
+            value={selectedSector}
+            onChange={(e) => {
+              setSelectedSector(e.target.value);
+              setSelectedIndustry(''); // Reset industry when sector changes
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+          >
+            <option value="">All Sectors</option>
+            {availableSectors.map(sector => (
+              <option key={sector} value={sector}>{sector}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700">Industry:</label>
+          <select
+            value={selectedIndustry}
+            onChange={(e) => setSelectedIndustry(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[250px]"
+          >
+            <option value="">All Industries</option>
+            {filteredIndustries.map(industry => (
+              <option key={industry} value={industry}>{industry}</option>
+            ))}
+          </select>
+        </div>
+
+        {(selectedSector || selectedIndustry) && (
+          <button
+            onClick={clearFilters}
+            className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+          >
+            Clear Filters
+          </button>
+        )}
+      </div>
 
       {/* Period Selector */}
       <div className="flex gap-2 mb-6 justify-center flex-wrap">
@@ -279,10 +346,20 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-500 text-sm">#{index + 1}</span>
                         <span className="font-semibold text-gray-900">{stock.symbol}</span>
+                        {stock.sector && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                            {stock.sector}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-gray-600 mt-1">
                         {stock.name.substring(0, 40)}{stock.name.length > 40 ? '...' : ''}
                       </div>
+                      {stock.industry && (
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          {stock.industry}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-green-600 text-base">
@@ -331,10 +408,20 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-500 text-sm">#{index + 1}</span>
                         <span className="font-semibold text-gray-900">{stock.symbol}</span>
+                        {stock.sector && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                            {stock.sector}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-gray-600 mt-1">
                         {stock.name.substring(0, 40)}{stock.name.length > 40 ? '...' : ''}
                       </div>
+                      {stock.industry && (
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          {stock.industry}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-red-600 text-base">

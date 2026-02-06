@@ -154,7 +154,10 @@ class StockOverview(models.Model):
     industry = models.CharField(max_length=100, blank=True)
     description = models.TextField(blank=True)
     address = models.CharField(max_length=200, blank=True)
+    official_site = models.URLField(max_length=200, blank=True)
+    cik = models.CharField(max_length=20, blank=True)  # SEC Central Index Key
     fiscal_year_end = models.CharField(max_length=20, blank=True)
+    latest_quarter = models.DateField(null=True, blank=True)
 
     # Key Metrics (all nullable for missing data)
     market_capitalization = models.BigIntegerField(null=True, blank=True)
@@ -165,6 +168,7 @@ class StockOverview(models.Model):
     dividend_per_share = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     dividend_yield = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     eps = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    diluted_eps_ttm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     # Financial Metrics
     revenue_per_share_ttm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -179,12 +183,19 @@ class StockOverview(models.Model):
     quarterly_earnings_growth_yoy = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     quarterly_revenue_growth_yoy = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     analyst_target_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    analyst_rating_strong_buy = models.IntegerField(null=True, blank=True)
+    analyst_rating_buy = models.IntegerField(null=True, blank=True)
+    analyst_rating_hold = models.IntegerField(null=True, blank=True)
+    analyst_rating_sell = models.IntegerField(null=True, blank=True)
+    analyst_rating_strong_sell = models.IntegerField(null=True, blank=True)
     trailing_pe = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     forward_pe = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     # Trading Metrics
     price_to_sales_ratio_ttm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     price_to_book_ratio = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    ev_to_revenue = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    ev_to_ebitda = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     beta = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     week_52_high = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     week_52_low = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -196,6 +207,10 @@ class StockOverview(models.Model):
     shares_float = models.BigIntegerField(null=True, blank=True)
     percent_insiders = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     percent_institutions = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+
+    # Dividend Dates
+    dividend_date = models.DateField(null=True, blank=True)
+    ex_dividend_date = models.DateField(null=True, blank=True)
 
     # Metadata
     last_updated = models.DateTimeField(auto_now=True)
@@ -245,3 +260,38 @@ class IntradayStockPrice(models.Model):
 
     def __str__(self):
         return f"{self.stock.symbol} - {self.timestamp}"
+
+
+class StockPerformance(models.Model):
+    """Precomputed stock performance metrics for each time period"""
+    PERIOD_CHOICES = [
+        ('1D', '1 Day'),
+        ('1W', '1 Week'),
+        ('1M', '1 Month'),
+        ('YTD', 'Year to Date'),
+        ('6M', '6 Months'),
+        ('1Y', '1 Year'),
+        ('5Y', '5 Years'),
+    ]
+
+    symbol = models.CharField(max_length=10, db_index=True)
+    name = models.CharField(max_length=100)
+    period = models.CharField(max_length=5, choices=PERIOD_CHOICES)
+    start_price = models.DecimalField(max_digits=12, decimal_places=2)
+    end_price = models.DecimalField(max_digits=12, decimal_places=2)
+    price_change = models.DecimalField(max_digits=12, decimal_places=2)
+    percent_change = models.DecimalField(max_digits=10, decimal_places=2)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    data_source = models.CharField(max_length=10, default='weekly')  # 'daily' or 'weekly'
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['symbol', 'period']
+        indexes = [
+            models.Index(fields=['period', '-percent_change']),  # For top gainers
+            models.Index(fields=['period', 'percent_change']),   # For top losers
+        ]
+
+    def __str__(self):
+        return f"{self.symbol} {self.period}: {self.percent_change}%"

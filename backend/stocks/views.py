@@ -315,6 +315,7 @@ def seed_all_stocks(request):
     - weekly: true/false (default: true)
     - daily: true/false (default: true)
     - intraday: true/false (default: true)
+    - overview: true/false (default: false) - Fetch company overview data
     - workers: concurrent workers (default: 15)
     - qpm: queries per minute limit (default: 70)
     - qps: queries per second limit (default: 4)
@@ -338,6 +339,7 @@ def seed_all_stocks(request):
     fetch_weekly = request.GET.get('weekly', 'true').lower() == 'true'
     fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
     fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
+    fetch_overview = request.GET.get('overview', 'false').lower() == 'true'
     interval = request.GET.get('interval', '1min')
     workers = int(request.GET.get('workers', 15))
     qpm = int(request.GET.get('qpm', 70))
@@ -347,7 +349,7 @@ def seed_all_stocks(request):
         """Background task to fetch all stock data using fast concurrent fetcher"""
         try:
             print("=== STARTING FAST CONCURRENT SEED ===", flush=True)
-            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}, interval={interval}", flush=True)
+            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}, overview={fetch_overview}, interval={interval}", flush=True)
             print(f"Rate limits: {qpm} QPM, {qps} QPS, {workers} workers", flush=True)
 
             call_command(
@@ -357,6 +359,7 @@ def seed_all_stocks(request):
                 weekly=fetch_weekly,
                 daily=fetch_daily,
                 intraday=fetch_intraday,
+                overview=fetch_overview,
                 interval=interval,
                 workers=workers,
                 qpm=qpm,
@@ -374,8 +377,9 @@ def seed_all_stocks(request):
     thread.start()
 
     # Calculate estimated time
-    num_stocks = 500  # Approximate S&P 500 count
-    data_types = sum([fetch_weekly, fetch_daily, fetch_intraday])
+    from stocks.management.commands.top5kcompanies import all_5k_stocks
+    num_stocks = len(all_5k_stocks)
+    data_types = sum([fetch_weekly, fetch_daily, fetch_intraday, fetch_overview])
     total_requests = num_stocks * data_types
     estimated_minutes = total_requests / qpm
 
@@ -385,6 +389,7 @@ def seed_all_stocks(request):
             'weekly': fetch_weekly,
             'daily': fetch_daily,
             'intraday': fetch_intraday,
+            'overview': fetch_overview,
             'interval': interval,
             'workers': workers,
             'qpm': qpm,
@@ -395,6 +400,37 @@ def seed_all_stocks(request):
             'estimated_minutes': round(estimated_minutes, 1)
         },
         'note': 'Check Railway logs for progress. Using concurrent fetcher for faster execution.'
+    })
+
+
+@api_view(['GET', 'POST'])
+def compute_performance_metrics(request):
+    """
+    Trigger computation of stock performance metrics.
+    Call this after seeding data to update the performance cache.
+
+    Query params:
+    - key: Secret key for authorization (set SEED_SECRET_KEY env var)
+    """
+    import os
+    from .services.performance_calculator import PerformanceCalculator
+
+    # Simple auth check
+    secret_key = os.getenv('SEED_SECRET_KEY', 'stockseed2024')
+    provided_key = request.GET.get('key') or request.data.get('key')
+
+    if provided_key != secret_key:
+        return Response(
+            {'error': 'Invalid or missing key'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    calculator = PerformanceCalculator()
+    results = calculator.compute_all()
+
+    return Response({
+        'message': 'Performance metrics computed successfully',
+        'records_created': results['computed']
     })
 
 
@@ -638,130 +674,98 @@ def get_data_freshness(request):
 
 @api_view(['GET'])
 def get_stock_performance(request):
-    """Get top winners and losers for different time periods using daily or weekly data"""
-    from django.db.models import Q
-    from datetime import datetime, timedelta
+    """
+    Get top winners and losers for different time periods.
+    Uses precomputed metrics from StockPerformance table for fast response.
 
-    # Try to import daily models, but don't fail if not available
-    try:
-        from .models import DailyStock, DailyStockPrice
-        daily_available = DailyStock.objects.using('daily').exists()
-    except Exception:
-        daily_available = False
+    Query params:
+    - sector: Filter by sector (e.g., "TECHNOLOGY")
+    - industry: Filter by industry (e.g., "SOFTWARE - APPLICATION")
+    """
+    from .models import StockPerformance, StockOverview
 
-    # Define time periods
-    now = datetime.now().date()
-    one_day_ago = now - timedelta(days=1)
-    one_week_ago = now - timedelta(days=7)
-    one_month_ago = now - timedelta(days=30)
-    six_months_ago = now - timedelta(days=180)
-    one_year_ago = now - timedelta(days=365)
-    five_years_ago = now - timedelta(days=1825)  # 5 * 365
-    start_of_year = datetime(now.year, 1, 1).date()
+    # Check if precomputed data exists
+    if not StockPerformance.objects.exists():
+        # Fallback: compute on-the-fly if metrics haven't been computed yet
+        from .services.performance_calculator import PerformanceCalculator
+        calculator = PerformanceCalculator()
+        calculator.compute_all()
 
-    time_periods = {
-        '1D': one_day_ago,
-        '1W': one_week_ago,
-        '1M': one_month_ago,
-        'YTD': start_of_year,
-        '6M': six_months_ago,
-        '1Y': one_year_ago,
-        '5Y': five_years_ago
-    }
+    # Get filter params
+    sector_filter = request.GET.get('sector', '').strip()
+    industry_filter = request.GET.get('industry', '').strip()
 
+    # Build lookup dict for sector/industry from StockOverview
+    overview_data = {}
+    for overview in StockOverview.objects.select_related('stock').all():
+        overview_data[overview.stock.symbol] = {
+            'sector': overview.sector or '',
+            'industry': overview.industry or ''
+        }
+
+    # Get list of symbols that match the filter
+    filtered_symbols = None
+    if sector_filter or industry_filter:
+        filtered_symbols = set()
+        for symbol, data in overview_data.items():
+            sector_match = not sector_filter or data['sector'].upper() == sector_filter.upper()
+            industry_match = not industry_filter or data['industry'].upper() == industry_filter.upper()
+            if sector_match and industry_match:
+                filtered_symbols.add(symbol)
+
+    periods = ['1D', '1W', '1M', 'YTD', '6M', '1Y', '5Y']
     results = {}
 
-    for period_name, start_date in time_periods.items():
-        stocks_performance = []
+    for period in periods:
+        # Build base queryset
+        base_qs = StockPerformance.objects.filter(period=period)
 
-        # Use daily data for 1D and 1W, weekly data for other periods
-        # But only if daily data is actually available
-        use_daily_data = period_name in ['1D', '1W'] and daily_available
+        # Apply symbol filter if sector/industry filter is active
+        if filtered_symbols is not None:
+            base_qs = base_qs.filter(symbol__in=filtered_symbols)
 
-        if use_daily_data:
-            # Use daily database for short-term analysis
-            stocks = DailyStock.objects.using('daily').all()
+        # Get top 10 gainers (highest percent_change)
+        top_gainers = list(base_qs.order_by('-percent_change')[:10].values(
+            'symbol', 'name', 'start_price', 'end_price',
+            'price_change', 'percent_change', 'start_date', 'end_date'
+        ))
 
-            for stock in stocks:
-                # For 1D: get last 2 trading days, for 1W: get last week of data
-                if period_name == '1D':
-                    # Get the last 2 available trading days
-                    recent_prices = DailyStockPrice.objects.using('daily').filter(
-                        stock=stock
-                    ).order_by('-date')[:2]
+        # Get top 10 losers (lowest percent_change)
+        top_losers = list(base_qs.order_by('percent_change')[:10].values(
+            'symbol', 'name', 'start_price', 'end_price',
+            'price_change', 'percent_change', 'start_date', 'end_date'
+        ))
 
-                    if len(recent_prices) == 2:
-                        end_price = recent_prices[0]
-                        start_price = recent_prices[1]
+        # Convert Decimal to float, dates to strings, and add sector/industry
+        for item in top_gainers + top_losers:
+            item['start_price'] = float(item['start_price'])
+            item['end_price'] = float(item['end_price'])
+            item['price_change'] = float(item['price_change'])
+            item['percent_change'] = float(item['percent_change'])
+            item['start_date'] = str(item['start_date'])
+            item['end_date'] = str(item['end_date'])
+            # Add sector/industry from overview data
+            symbol_data = overview_data.get(item['symbol'], {})
+            item['sector'] = symbol_data.get('sector', '')
+            item['industry'] = symbol_data.get('industry', '')
 
-                        price_change = float(end_price.close_price) - float(start_price.close_price)
-                        percent_change = (price_change / float(start_price.close_price)) * 100
-
-                        stocks_performance.append({
-                            'symbol': stock.symbol,
-                            'name': stock.name,
-                            'start_price': float(start_price.close_price),
-                            'end_price': float(end_price.close_price),
-                            'price_change': round(price_change, 2),
-                            'percent_change': round(percent_change, 2),
-                            'start_date': str(start_price.date),
-                            'end_date': str(end_price.date)
-                        })
-                else:
-                    # For 1W: get data from start_date onwards
-                    start_price = DailyStockPrice.objects.using('daily').filter(
-                        stock=stock,
-                        date__gte=start_date
-                    ).order_by('date').first()
-                    end_price = DailyStockPrice.objects.using('daily').filter(
-                        stock=stock
-                    ).order_by('-date').first()
-
-                    if start_price and end_price and start_price != end_price:
-                        price_change = float(end_price.close_price) - float(start_price.close_price)
-                        percent_change = (price_change / float(start_price.close_price)) * 100
-
-                        stocks_performance.append({
-                            'symbol': stock.symbol,
-                            'name': stock.name,
-                            'start_price': float(start_price.close_price),
-                            'end_price': float(end_price.close_price),
-                            'price_change': round(price_change, 2),
-                            'percent_change': round(percent_change, 2),
-                            'start_date': str(start_price.date),
-                            'end_date': str(end_price.date)
-                        })
-        else:
-            # Use weekly data for longer-term analysis
-            stocks = Stock.objects.all()
-
-            for stock in stocks:
-                # Get prices at start and end of period from weekly data
-                start_price = stock.prices.filter(date__gte=start_date).order_by('date').first()
-                end_price = stock.prices.order_by('-date').first()
-
-                if start_price and end_price and start_price != end_price:
-                    price_change = float(end_price.close_price) - float(start_price.close_price)
-                    percent_change = (price_change / float(start_price.close_price)) * 100
-
-                    stocks_performance.append({
-                        'symbol': stock.symbol,
-                        'name': stock.name,
-                        'start_price': float(start_price.close_price),
-                        'end_price': float(end_price.close_price),
-                        'price_change': round(price_change, 2),
-                        'percent_change': round(percent_change, 2),
-                        'start_date': str(start_price.date),
-                        'end_date': str(end_price.date)
-                    })
-
-        # Sort by percent change
-        stocks_performance.sort(key=lambda x: x['percent_change'], reverse=True)
-
-        results[period_name] = {
-            'top_gainers': stocks_performance[:10],
-            'top_losers': stocks_performance[-10:][::-1]  # Reverse to show worst first
+        results[period] = {
+            'top_gainers': top_gainers,
+            'top_losers': top_losers
         }
+
+    # Get available sectors and industries for filters
+    sectors = sorted(set(d['sector'] for d in overview_data.values() if d['sector']))
+    industries = sorted(set(d['industry'] for d in overview_data.values() if d['industry']))
+
+    results['filters'] = {
+        'available_sectors': sectors,
+        'available_industries': industries,
+        'applied': {
+            'sector': sector_filter if sector_filter else None,
+            'industry': industry_filter if industry_filter else None
+        }
+    }
 
     return Response(results)
 
