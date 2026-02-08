@@ -758,9 +758,22 @@ def get_stock_performance(request):
     sectors = sorted(set(d['sector'] for d in overview_data.values() if d['sector']))
     industries = sorted(set(d['industry'] for d in overview_data.values() if d['industry']))
 
+    # Build sector -> industries mapping
+    sector_industries = {}
+    for data in overview_data.values():
+        sector = data.get('sector', '')
+        industry = data.get('industry', '')
+        if sector and industry:
+            if sector not in sector_industries:
+                sector_industries[sector] = set()
+            sector_industries[sector].add(industry)
+    # Convert sets to sorted lists
+    sector_industries = {k: sorted(v) for k, v in sector_industries.items()}
+
     results['filters'] = {
         'available_sectors': sectors,
         'available_industries': industries,
+        'sector_industries': sector_industries,
         'applied': {
             'sector': sector_filter if sector_filter else None,
             'industry': industry_filter if industry_filter else None

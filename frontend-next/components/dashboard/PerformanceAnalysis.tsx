@@ -253,9 +253,12 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
   // Get available filters from the response
   const availableSectors = performance?.filters?.available_sectors || [];
   const availableIndustries = performance?.filters?.available_industries || [];
+  const sectorIndustries = performance?.filters?.sector_industries || {};
 
-  // Show all industries (API handles the actual filtering)
-  const filteredIndustries = availableIndustries;
+  // Filter industries based on selected sector
+  const filteredIndustries = selectedSector
+    ? sectorIndustries[selectedSector] || []
+    : availableIndustries;
 
   const clearFilters = () => {
     setSelectedSector('');

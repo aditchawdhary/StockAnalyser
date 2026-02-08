@@ -69,6 +69,7 @@ export interface PerformanceData {
 export interface PerformanceFilters {
   available_sectors: string[];
   available_industries: string[];
+  sector_industries: Record<string, string[]>;
   applied: {
     sector: string | null;
     industry: string | null;
