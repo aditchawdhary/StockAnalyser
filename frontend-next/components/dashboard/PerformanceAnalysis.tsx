@@ -31,7 +31,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
     }
   );
   const [selectedPeriod, setSelectedPeriod] = useState<'1D' | '1W' | '1M' | 'YTD' | '6M' | '1Y' | '5Y'>('1M');
-  const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  const [expandedStock, setExpandedStock] = useState<{ symbol: string; list: 'gainers' | 'losers' } | null>(null);
   const [stockData, setStockData] = useState<Record<string, { daily: StockPriceData; weekly: StockPriceData }>>({});
   const [loadingStock, setLoadingStock] = useState<string | null>(null);
   const svgRefs = useRef<Record<string, SVGSVGElement | null>>({});
@@ -65,23 +65,23 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
     }
   };
 
-  const handleStockClick = async (symbol: string) => {
-    if (expandedStock === symbol) {
+  const handleStockClick = async (symbol: string, list: 'gainers' | 'losers') => {
+    if (expandedStock?.symbol === symbol && expandedStock?.list === list) {
       setExpandedStock(null);
     } else {
-      setExpandedStock(symbol);
+      setExpandedStock({ symbol, list });
       await fetchStockData(symbol);
     }
   };
 
   useEffect(() => {
-    if (expandedStock && stockData[expandedStock]) {
-      const data = stockData[expandedStock];
+    if (expandedStock && stockData[expandedStock.symbol]) {
+      const data = stockData[expandedStock.symbol];
       const priceData = ['1D', '1W', '1M', '6M', '1Y'].includes(selectedPeriod)
         ? data.daily
         : data.weekly;
       if (priceData) {
-        drawChart(expandedStock, priceData, selectedPeriod);
+        drawChart(expandedStock.symbol, priceData, selectedPeriod);
       }
     }
   }, [expandedStock, stockData, selectedPeriod]);
@@ -341,7 +341,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
             {currentData.top_gainers.map((stock, index) => (
               <div key={stock.symbol} className="border-b border-gray-200">
                 <div
-                  onClick={() => handleStockClick(stock.symbol)}
+                  onClick={() => handleStockClick(stock.symbol, 'gainers')}
                   className="p-3 cursor-pointer transition-colors hover:bg-green-50"
                 >
                   <div className="flex justify-between items-center">
@@ -365,8 +365,8 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-green-600 text-base">
-                        +{stock.percent_change}%
+                      <div className={`font-bold text-base ${stock.percent_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {stock.percent_change >= 0 ? '+' : ''}{stock.percent_change}%
                       </div>
                       <div className="text-xs text-gray-600">
                         ${stock.start_price.toFixed(2)} → ${stock.end_price.toFixed(2)}
@@ -375,7 +375,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                   </div>
                 </div>
 
-                {expandedStock === stock.symbol && (
+                {expandedStock?.symbol === stock.symbol && expandedStock?.list === 'gainers' && (
                   <div className="px-3 pb-4 bg-gray-50">
                     {loadingStock === stock.symbol ? (
                       <div className="flex justify-center items-center h-32">
@@ -403,7 +403,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
             {currentData.top_losers.map((stock, index) => (
               <div key={stock.symbol} className="border-b border-gray-200">
                 <div
-                  onClick={() => handleStockClick(stock.symbol)}
+                  onClick={() => handleStockClick(stock.symbol, 'losers')}
                   className="p-3 cursor-pointer transition-colors hover:bg-red-50"
                 >
                   <div className="flex justify-between items-center">
@@ -427,8 +427,8 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-red-600 text-base">
-                        {stock.percent_change}%
+                      <div className={`font-bold text-base ${stock.percent_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {stock.percent_change >= 0 ? '+' : ''}{stock.percent_change}%
                       </div>
                       <div className="text-xs text-gray-600">
                         ${stock.start_price.toFixed(2)} → ${stock.end_price.toFixed(2)}
@@ -437,7 +437,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                   </div>
                 </div>
 
-                {expandedStock === stock.symbol && (
+                {expandedStock?.symbol === stock.symbol && expandedStock?.list === 'losers' && (
                   <div className="px-3 pb-4 bg-gray-50">
                     {loadingStock === stock.symbol ? (
                       <div className="flex justify-center items-center h-32">

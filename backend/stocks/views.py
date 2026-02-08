@@ -695,13 +695,18 @@ def get_stock_performance(request):
     sector_filter = request.GET.get('sector', '').strip()
     industry_filter = request.GET.get('industry', '').strip()
 
-    # Build lookup dict for sector/industry from StockOverview
+    # Get symbols that have performance data (Fortune 500)
+    performance_symbols = set(StockPerformance.objects.values_list('symbol', flat=True).distinct())
+
+    # Build lookup dict for sector/industry from StockOverview (only for stocks with performance data)
     overview_data = {}
     for overview in StockOverview.objects.select_related('stock').all():
-        overview_data[overview.stock.symbol] = {
-            'sector': overview.sector or '',
-            'industry': overview.industry or ''
-        }
+        symbol = overview.stock.symbol
+        if symbol in performance_symbols:
+            overview_data[symbol] = {
+                'sector': overview.sector or '',
+                'industry': overview.industry or ''
+            }
 
     # Get list of symbols that match the filter
     filtered_symbols = None
