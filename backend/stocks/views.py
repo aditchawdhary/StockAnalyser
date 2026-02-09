@@ -1290,6 +1290,28 @@ def get_news_sentiment(request, symbol):
 
 
 @api_view(['GET'])
+def get_stock_logo(request, symbol):
+    """Serve the logo image for a stock symbol from the database."""
+    from django.http import HttpResponse
+
+    symbol = symbol.upper()
+    try:
+        stock = Stock.objects.get(symbol=symbol)
+    except Stock.DoesNotExist:
+        return Response({'error': f'Stock {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not stock.logo:
+        return Response({'error': f'No logo available for {symbol}'}, status=status.HTTP_404_NOT_FOUND)
+
+    response = HttpResponse(
+        stock.logo,
+        content_type=stock.logo_content_type or 'image/png'
+    )
+    response['Cache-Control'] = 'public, max-age=604800'
+    return response
+
+
+@api_view(['GET'])
 def get_intraday_stock_data(request, symbol):
     """
     Get intraday stock data for a single symbol.

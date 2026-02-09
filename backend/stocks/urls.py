@@ -9,6 +9,7 @@ urlpatterns = [
     path('stock/<str:symbol>/overview/', views.get_stock_overview, name='get_stock_overview'),
     path('stock/<str:symbol>/news/', views.get_news_sentiment, name='get_news_sentiment'),
     path('stock/<str:symbol>/intraday/', views.get_intraday_stock_data, name='get_intraday_stock_data'),
+    path('stock/<str:symbol>/logo/', views.get_stock_logo, name='get_stock_logo'),
 
     # Multiple stocks
     path('stocks/', views.get_multiple_stocks, name='get_multiple_stocks'),

@@ -9,6 +9,8 @@ class Stock(models.Model):
     industry = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     sector = models.CharField(max_length=100, blank=True, null=True)
     is_sp500 = models.BooleanField(default=False, db_index=True)
+    logo = models.BinaryField(blank=True, null=True)
+    logo_content_type = models.CharField(max_length=50, blank=True, null=True)
     last_updated = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -11,7 +11,7 @@ interface StockLogoProps {
 const StockLogo: React.FC<StockLogoProps> = ({ symbol, size = 24, className = '' }) => {
   const [hasError, setHasError] = useState(false);
 
-  const logoUrl = `https://assets.parqet.com/logos/symbol/${symbol}`;
+  const logoUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/stock/${symbol}/logo/`;
 
   if (hasError) {
     return (

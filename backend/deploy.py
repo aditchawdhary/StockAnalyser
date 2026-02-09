@@ -82,6 +82,9 @@ def main():
     # Seed initial stock data if database is empty
     seed_initial_stocks()
 
+    # Download logos for stocks that don't have one yet
+    seed_logos()
+
     print("=" * 50, flush=True)
     print("DEPLOY.PY COMPLETED!", flush=True)
     print("=" * 50, flush=True)
@@ -127,6 +130,24 @@ def seed_initial_stocks():
             traceback.print_exc()
     else:
         print(f"Database already has {stock_count} stocks, skipping seed.", flush=True)
+
+
+def seed_logos():
+    """Download logos for stocks that don't have one yet."""
+    from stocks.models import Stock
+
+    missing_count = Stock.objects.filter(logo__isnull=True).count()
+
+    if missing_count > 0:
+        print(f"Downloading logos for {missing_count} stocks...", flush=True)
+        try:
+            call_command('fetch_logos', workers=10)
+        except Exception as e:
+            print(f"Warning: Error downloading logos: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+    else:
+        print("All stocks already have logos.", flush=True)
 
 
 if __name__ == '__main__':
