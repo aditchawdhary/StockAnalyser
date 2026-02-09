@@ -316,6 +316,7 @@ def seed_all_stocks(request):
     - daily: true/false (default: true)
     - intraday: true/false (default: true)
     - overview: true/false (default: false) - Fetch company overview data
+    - logos: true/false (default: false) - Download stock logos
     - workers: concurrent workers (default: 15)
     - qpm: queries per minute limit (default: 70)
     - qps: queries per second limit (default: 4)
@@ -340,6 +341,7 @@ def seed_all_stocks(request):
     fetch_daily = request.GET.get('daily', 'true').lower() == 'true'
     fetch_intraday = request.GET.get('intraday', 'true').lower() == 'true'
     fetch_overview = request.GET.get('overview', 'false').lower() == 'true'
+    fetch_logos = request.GET.get('logos', 'false').lower() == 'true'
     interval = request.GET.get('interval', '1min')
     workers = int(request.GET.get('workers', 15))
     qpm = int(request.GET.get('qpm', 70))
@@ -349,7 +351,7 @@ def seed_all_stocks(request):
         """Background task to fetch all stock data using fast concurrent fetcher"""
         try:
             print("=== STARTING FAST CONCURRENT SEED ===", flush=True)
-            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}, overview={fetch_overview}, interval={interval}", flush=True)
+            print(f"Options: weekly={fetch_weekly}, daily={fetch_daily}, intraday={fetch_intraday}, overview={fetch_overview}, logos={fetch_logos}, interval={interval}", flush=True)
             print(f"Rate limits: {qpm} QPM, {qps} QPS, {workers} workers", flush=True)
 
             call_command(
@@ -365,6 +367,11 @@ def seed_all_stocks(request):
                 qpm=qpm,
                 qps=qps
             )
+
+            if fetch_logos:
+                print("=== DOWNLOADING LOGOS ===", flush=True)
+                call_command('fetch_logos', workers=workers)
+                print("=== LOGO DOWNLOAD COMPLETE ===", flush=True)
 
             print("=== ALL SEEDING COMPLETE ===", flush=True)
         except Exception as e:
@@ -390,6 +397,7 @@ def seed_all_stocks(request):
             'daily': fetch_daily,
             'intraday': fetch_intraday,
             'overview': fetch_overview,
+            'logos': fetch_logos,
             'interval': interval,
             'workers': workers,
             'qpm': qpm,
