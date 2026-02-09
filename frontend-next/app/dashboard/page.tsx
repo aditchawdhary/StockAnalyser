@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import PerformanceAnalysis from '../../components/dashboard/PerformanceAnalysis';
 import StockInfoModal from '../../components/stock/StockInfoModal';
+import StockLogo from '../../components/shared/StockLogo';
 import { Stock, StockPriceData, StockPrice, TimeRange } from '../../types';
 import { prefetchAll, fetcher, SWR_KEYS } from '../../lib/swr';
 
@@ -840,7 +841,8 @@ export default function Dashboard() {
                       index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
                     }`}
                   >
-                    <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <StockLogo symbol={result['1. symbol']} size={32} />
                       <div className="flex-1">
                         <div className="font-bold text-gray-900">{result['1. symbol']}</div>
                         <div className="text-sm text-gray-600">{result['2. name']}</div>
@@ -879,9 +881,7 @@ export default function Dashboard() {
                       index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
                     }`}
                   >
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <StockLogo symbol={item.symbol} size={28} />
                     <div className="flex-1">
                       <div className="font-bold text-gray-900">{item.symbol}</div>
                       <div className="text-sm text-gray-600">{item.name}</div>
@@ -908,6 +908,7 @@ export default function Dashboard() {
                     onClick={() => setInfoModalSymbol(symbol)}
                     className="flex items-center gap-2 hover:text-teal-600 transition-colors cursor-pointer"
                   >
+                    <StockLogo symbol={symbol} size={20} />
                     <span className="font-semibold">{symbol}</span>
                     {stockInfo && (
                       <span className="text-xs text-teal-700">({stockInfo.name.substring(0, 20)}...)</span>

@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import * as d3 from 'd3';
 import { PerformanceAnalysisProps, PerformanceResponse, StockPriceData, StockPrice } from '../../types';
 import { fetcher } from '../../lib/swr';
+import StockLogo from '../shared/StockLogo';
 
 const BACKEND_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
 
@@ -348,6 +349,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-500 text-sm">#{index + 1}</span>
+                        <StockLogo symbol={stock.symbol} size={24} />
                         <span className="font-semibold text-gray-900">{stock.symbol}</span>
                         {stock.sector && (
                           <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
@@ -410,6 +412,7 @@ const PerformanceAnalysis: React.FC<PerformanceAnalysisProps> = ({ onSelectStock
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-500 text-sm">#{index + 1}</span>
+                        <StockLogo symbol={stock.symbol} size={24} />
                         <span className="font-semibold text-gray-900">{stock.symbol}</span>
                         {stock.sector && (
                           <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">

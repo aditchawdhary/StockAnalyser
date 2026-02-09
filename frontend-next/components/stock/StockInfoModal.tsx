@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { StockInfoModalProps, StockOverviewResponse, NewsSentimentResponse, StockPriceData, StockPrice } from '../../types';
+import StockLogo from '../shared/StockLogo';
 
 interface SearchResult {
   '1. symbol': string;
@@ -837,7 +838,8 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
                       index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
                     }`}
                   >
-                    <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <StockLogo symbol={result['1. symbol']} size={32} />
                       <div className="flex-1">
                         <div className="font-bold text-gray-900">{result['1. symbol']}</div>
                         <div className="text-sm text-gray-600">{result['2. name']}</div>
@@ -872,9 +874,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
                       index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
                     }`}
                   >
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <StockLogo symbol={item.symbol} size={28} />
                     <div className="flex-1">
                       <div className="font-bold text-gray-900">{item.symbol}</div>
                       <div className="text-sm text-gray-600">{item.name}</div>
@@ -891,6 +891,7 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
           {/* Stock Info - Symbol, Name, Price */}
           <div className="flex items-center justify-center gap-4 mt-4">
             <div className="flex items-center gap-2">
+              <StockLogo symbol={currentSymbol} size={32} />
               <h2 className="text-2xl font-bold text-gray-900">{currentSymbol}</h2>
               <span className="text-gray-400">•</span>
               <p className="text-gray-600">{overview?.name || 'Loading...'}</p>
