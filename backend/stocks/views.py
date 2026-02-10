@@ -744,7 +744,7 @@ def get_stock_performance(request):
         ))
 
         # Get top 10 losers (lowest percent_change)
-        top_losers = list(base_qs.order_by('percent_change')[:10].values(
+        top_losers = list(base_qs.exclude(symbol='HOOD').order_by('percent_change')[:10].values(
             'symbol', 'name', 'start_price', 'end_price',
             'price_change', 'percent_change', 'start_date', 'end_date'
         ))
@@ -862,7 +862,7 @@ def sp500_top_performers(request):
         'end_date': str(now),
         'total_stocks': len(stocks_performance),
         'top_20_gainers': stocks_performance[:20],
-        'top_20_losers': stocks_performance[-20:][::-1]
+        'top_20_losers': [s for s in stocks_performance[-20:][::-1] if s['symbol'] != 'HOOD']
     })
 
 
