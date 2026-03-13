@@ -6,6 +6,10 @@ import * as d3 from 'd3';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import PerformanceAnalysis from '../../components/dashboard/PerformanceAnalysis';
+import MarketOverview from '../../components/dashboard/MarketOverview';
+import WatchlistSidebar from '../../components/dashboard/WatchlistSidebar';
+import TopMovers from '../../components/dashboard/TopMovers';
+import NewsFeed from '../../components/dashboard/NewsFeed';
 import StockInfoModal from '../../components/stock/StockInfoModal';
 import StockLogo from '../../components/shared/StockLogo';
 import { Stock, StockPriceData, StockPrice, TimeRange } from '../../types';
@@ -113,12 +117,9 @@ export default function Dashboard() {
     }
   }, []);
 
-  // SWR automatically refetches when selectedSymbols changes
-
   useEffect(() => {
     Object.keys(allPrices).forEach(symbol => {
       if (chartTimeRanges[symbol]) {
-        // Use intraday for 1D/1W, daily for 1M-1Y, weekly for 5Y/MAX
         const range = chartTimeRanges[symbol];
         const useIntradayData = ['1D', '1W'].includes(range);
         const useDailyData = ['1M', '6M', '1Y'].includes(range);
@@ -160,11 +161,10 @@ export default function Dashboard() {
       timestamp: Date.now()
     };
 
-    // Remove duplicate if it exists and add to the beginning
     const updatedHistory = [
       newHistoryItem,
       ...searchHistory.filter(item => item.symbol !== stockSymbol)
-    ].slice(0, 10); // Keep only last 10 items
+    ].slice(0, 10);
 
     setSearchHistory(updatedHistory);
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
@@ -184,14 +184,12 @@ export default function Dashboard() {
 
     setSearching(true);
     try {
-      // Use backend proxy to avoid exposing API key
       const response = await fetch(
         `${BACKEND_URL}/search/?q=${encodeURIComponent(query)}`
       );
       const data = await response.json();
 
       if (data.bestMatches) {
-        // Filter to only show stocks that exist in our database
         const dbSymbols = new Set(allStocks.map(s => s.symbol));
         const filteredResults = data.bestMatches.filter(
           (match: SearchResult) => dbSymbols.has(match['1. symbol'])
@@ -206,25 +204,12 @@ export default function Dashboard() {
     }
   };
 
-  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSearchQuery(value);
-
-    // Debounce the search
-    const timeoutId = setTimeout(() => {
-      searchStocks(value);
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  };
-
   const addStockFromSearch = (symbol: string, name?: string) => {
     if (!selectedSymbols.includes(symbol)) {
       setSelectedSymbols(prev => [...prev, symbol]);
       setChartTimeRanges(prev => ({ ...prev, [symbol]: '1Y' }));
     }
 
-    // Add to history if name is provided
     if (name) {
       addToHistory(symbol, name);
     }
@@ -292,7 +277,6 @@ export default function Dashboard() {
       return data;
     }
 
-    // For time-based filtering, calculate the date threshold
     const now = new Date();
     let startDate: Date;
 
@@ -316,7 +300,6 @@ export default function Dashboard() {
         startDate = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000);
         break;
       default:
-        // Default to 1 year
         startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
     }
 
@@ -324,7 +307,6 @@ export default function Dashboard() {
   };
 
   const drawChart = (symbol: string, prices: StockPriceData, timeRange: string) => {
-    // Check for intraday, daily, and weekly time series (in priority order)
     const possibleKeys = [
       'Time Series (5min)',
       'Time Series (1min)',
@@ -357,7 +339,6 @@ export default function Dashboard() {
     if (data.length === 0) return;
 
     const margin = { top: 60, right: 30, bottom: 50, left: 70 };
-    // Get actual SVG dimensions
     const svgRect = svgElement.getBoundingClientRect();
     const width = svgRect.width - margin.left - margin.right;
     const height = svgRect.height - margin.top - margin.bottom;
@@ -509,7 +490,7 @@ export default function Dashboard() {
         .style('z-index', 1000);
     }
 
-    // Add range selection overlay
+    // Range selection overlay
     const rangeOverlay = svg.append('rect')
       .attr('class', 'range-overlay')
       .attr('y', 0)
@@ -517,7 +498,6 @@ export default function Dashboard() {
       .style('fill', lineColor)
       .style('opacity', 0);
 
-    // Add range info display
     const rangeInfo = svg.append('g')
       .attr('class', 'range-info')
       .style('opacity', 0);
@@ -541,7 +521,6 @@ export default function Dashboard() {
       .attr('x', 0)
       .attr('y', 0);
 
-    // Drag state
     let isDragging = false;
     let dragStartX = 0;
     let dragStartData: StockPrice | null = null;
@@ -576,12 +555,10 @@ export default function Dashboard() {
         const [mouseX] = d3.pointer(event);
 
         if (isDragging && dragStartData) {
-          // Hide hover elements during drag
           verticalLine.style('opacity', 0);
           priceLabel.style('opacity', 0);
           tooltip.transition().duration(0).style('opacity', 0);
 
-          // Show range selection
           const currentData = getClosestDataPoint(mouseX);
 
           if (currentData) {
@@ -593,7 +570,6 @@ export default function Dashboard() {
               .attr('width', x2 - x1)
               .style('opacity', 0.15);
 
-            // Calculate change
             const startPrice = dragStartData.close;
             const endPrice = currentData.close;
             const priceChange = endPrice - startPrice;
@@ -601,29 +577,23 @@ export default function Dashboard() {
             const isRangePositive = priceChange >= 0;
             const rangeColor = isRangePositive ? '#16a34a' : '#dc2626';
 
-            // Format dates
             const startDate = dragStartData.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             const endDate = currentData.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-            // Format price change with arrow
-            const arrow = isRangePositive ? '↑' : '↓';
+            const arrow = isRangePositive ? '\u2191' : '\u2193';
             const priceText = `${arrow} ${isRangePositive ? '+' : ''}$${priceChange.toFixed(2)} (${isRangePositive ? '+' : ''}${percentChange.toFixed(2)}%)`;
-            const dateText = ` | ${startDate} → ${endDate}`;
+            const dateText = ` | ${startDate} \u2192 ${endDate}`;
 
-            // Update price text (colored)
             rangeInfoPriceText
               .text(priceText)
               .attr('fill', rangeColor);
 
-            // Get price text width to position date text
             const priceBox = (rangeInfoPriceText.node() as SVGTextElement).getBBox();
 
-            // Update date text (neutral color)
             rangeInfoDateText
               .text(dateText)
               .attr('x', priceBox.width);
 
-            // Get combined bounding box
             const dateBox = (rangeInfoDateText.node() as SVGTextElement).getBBox();
             const totalWidth = priceBox.width + dateBox.width;
             const totalHeight = Math.max(priceBox.height, dateBox.height);
@@ -636,14 +606,13 @@ export default function Dashboard() {
               .attr('stroke', '#ddd');
 
             const infoX = (x1 + x2) / 2;
-            const infoY = 20; // Position inside chart area, near top
+            const infoY = 20;
 
             rangeInfo
               .attr('transform', `translate(${infoX - totalWidth / 2},${infoY})`)
               .style('opacity', 1);
           }
         } else {
-          // Normal hover behavior
           const d = getClosestDataPoint(mouseX);
 
           if (d) {
@@ -666,11 +635,11 @@ export default function Dashboard() {
             tooltip.transition().duration(100).style('opacity', 1);
             tooltip.html(`
               <strong>${timeLabel} ${dateDisplay}</strong><br/>
-              <span style="color: ${lineColor};">●</span> Open: $${d.open.toFixed(2)}<br/>
-              <span style="color: #16a34a;">●</span> High: $${d.high.toFixed(2)}<br/>
-              <span style="color: #dc2626;">●</span> Low: $${d.low.toFixed(2)}<br/>
-              <span style="color: ${lineColor};">●</span> Close: $${d.close.toFixed(2)}<br/>
-              📊 Volume: ${(d.volume / 1000000).toFixed(1)}M
+              <span style="color: ${lineColor};">\u25CF</span> Open: $${d.open.toFixed(2)}<br/>
+              <span style="color: #16a34a;">\u25CF</span> High: $${d.high.toFixed(2)}<br/>
+              <span style="color: #dc2626;">\u25CF</span> Low: $${d.low.toFixed(2)}<br/>
+              <span style="color: ${lineColor};">\u25CF</span> Close: $${d.close.toFixed(2)}<br/>
+              Volume: ${(d.volume / 1000000).toFixed(1)}M
             `)
               .style('left', (event.pageX + 10) + 'px')
               .style('top', (event.pageY - 28) + 'px');
@@ -701,311 +670,286 @@ export default function Dashboard() {
       setSelectedSymbols(prev => [...prev, symbol]);
       setChartTimeRanges(prev => ({ ...prev, [symbol]: '1Y' }));
 
-      // Wait for the chart to render before scrolling
       setTimeout(() => {
         const chartElement = chartCardRefs.current[symbol];
         if (chartElement) {
           chartElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
           setHighlightedStock(symbol);
-
-          // Clear highlight after 2 seconds
-          setTimeout(() => {
-            setHighlightedStock(null);
-          }, 2000);
+          setTimeout(() => { setHighlightedStock(null); }, 2000);
         }
       }, 100);
     } else {
-      // Stock already exists, just scroll to it
       const chartElement = chartCardRefs.current[symbol];
       if (chartElement) {
         chartElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setHighlightedStock(symbol);
-
-        // Clear highlight after 2 seconds
-        setTimeout(() => {
-          setHighlightedStock(null);
-        }, 2000);
+        setTimeout(() => { setHighlightedStock(null); }, 2000);
       }
     }
   };
 
+  const handleWatchlistSelect = (symbol: string) => {
+    setInfoModalSymbol(symbol);
+  };
+
   return (
-    <div className="p-8 bg-gray-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        {/* Header with Back Link */}
-        <div className="mb-6 flex items-center justify-between">
-          <Link href="/" className="text-rh-teal-500 hover:text-rh-teal-600 font-semibold flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Home
-          </Link>
-          {session?.user && (
-            <button className="flex items-center gap-2 text-gray-700 hover:text-gray-900 font-medium">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              Account
-            </button>
-          )}
-        </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Market Overview Bar */}
+      <MarketOverview />
 
-        <h1 className="text-4xl font-bold mb-8 text-gray-900 text-center">
-          Vector Tracker - {selectedSymbols.length} stocks selected
-        </h1>
-
-        {/* Stock Search */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold">
-              Search & Add Stocks
-            </h2>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSelectedSymbols([])}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-              >
-                Clear All
-              </button>
-            </div>
-          </div>
-
-          {/* Search Bar */}
-          <div className="relative mb-4">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setHighlightedIndex(-1);
-                  searchStocks(e.target.value);
-                }}
-                onKeyDown={handleSearchKeyDown}
-                onFocus={() => {
-                  setHighlightedIndex(-1);
-                  if (searchResults.length > 0) {
-                    setShowResults(true);
-                  } else {
-                    setShowHistory(true);
-                  }
-                }}
-                placeholder="Search stocks by symbol or name (e.g., AAPL, Apple, Tesla)..."
-                className="w-full px-4 py-3 pl-12 pr-12 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-rh-teal-500 focus:border-transparent text-gray-900"
-              />
-              <svg
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              {!searching && searchHistory.length > 0 && (
-                <button
-                  onClick={() => setShowHistory(!showHistory)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  title="Search History"
-                >
+      {/* Main Layout: Content + Sidebar */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Main Content */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 py-6">
+            {/* Header */}
+            <div className="mb-6 flex items-center justify-between">
+              <Link href="/" className="text-rh-teal-500 hover:text-rh-teal-600 font-semibold flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Back to Home
+              </Link>
+              {session?.user && (
+                <button className="flex items-center gap-2 text-gray-700 hover:text-gray-900 font-medium">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
+                  Account
                 </button>
               )}
-              {searching && (
-                <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
-                  <div className="animate-spin h-5 w-5 border-2 border-rh-teal-500 border-t-transparent rounded-full"></div>
-                </div>
-              )}
             </div>
 
-            {/* Search Results Dropdown */}
-            {showResults && searchResults.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-96 overflow-y-auto">
-                {searchResults.map((result, index) => (
-                  <div
-                    key={result['1. symbol']}
-                    onClick={() => {
-                      addToHistory(result['1. symbol'], result['2. name']);
-                      setInfoModalSymbol(result['1. symbol']);
-                      setShowResults(false);
-                      setHighlightedIndex(-1);
-                    }}
-                    onMouseEnter={() => setHighlightedIndex(index)}
-                    className={`p-4 cursor-pointer border-b border-gray-100 transition-colors ${
-                      index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
-                    }`}
+            {/* Search Bar */}
+            <div className="relative mb-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setHighlightedIndex(-1);
+                    searchStocks(e.target.value);
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  onFocus={() => {
+                    setHighlightedIndex(-1);
+                    if (searchResults.length > 0) {
+                      setShowResults(true);
+                    } else {
+                      setShowHistory(true);
+                    }
+                  }}
+                  placeholder="Search stocks..."
+                  className="w-full px-4 py-3 pl-12 pr-12 border border-gray-300 rounded-full bg-white focus:ring-2 focus:ring-rh-teal-500 focus:border-transparent text-gray-900 shadow-sm"
+                />
+                <svg
+                  className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                {!searching && searchHistory.length > 0 && (
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    title="Search History"
                   >
-                    <div className="flex items-center gap-3">
-                      <StockLogo symbol={result['1. symbol']} size={32} />
-                      <div className="flex-1">
-                        <div className="font-bold text-gray-900">{result['1. symbol']}</div>
-                        <div className="text-sm text-gray-600">{result['2. name']}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {result['3. type']} • {result['4. region']} • {result['8. currency']}
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                )}
+                {searching && (
+                  <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin h-5 w-5 border-2 border-rh-teal-500 border-t-transparent rounded-full"></div>
+                  </div>
+                )}
+              </div>
+
+              {/* Search Results Dropdown */}
+              {showResults && searchResults.length > 0 && (
+                <div className="absolute z-10 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-96 overflow-y-auto">
+                  {searchResults.map((result, index) => (
+                    <div
+                      key={result['1. symbol']}
+                      onClick={() => {
+                        addToHistory(result['1. symbol'], result['2. name']);
+                        setInfoModalSymbol(result['1. symbol']);
+                        setShowResults(false);
+                        setHighlightedIndex(-1);
+                      }}
+                      onMouseEnter={() => setHighlightedIndex(index)}
+                      className={`p-3 cursor-pointer border-b border-gray-50 transition-colors ${
+                        index === highlightedIndex ? 'bg-gray-50' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <StockLogo symbol={result['1. symbol']} size={32} />
+                        <div className="flex-1">
+                          <div className="font-semibold text-gray-900">{result['1. symbol']}</div>
+                          <div className="text-sm text-gray-500">{result['2. name']}</div>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {result['3. type']} · {result['4. region']}
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Search History Dropdown */}
-            {showHistory && !showResults && searchHistory.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-96 overflow-y-auto">
-                <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-                  <span className="text-sm font-semibold text-gray-700">Recent Searches</span>
-                  <button
-                    onClick={clearHistory}
-                    className="text-xs text-red-600 hover:text-red-700 font-medium"
-                  >
-                    Clear All
-                  </button>
+                  ))}
                 </div>
-                {searchHistory.map((item, index) => (
-                  <div
-                    key={item.symbol}
-                    onClick={() => {
-                      setInfoModalSymbol(item.symbol);
-                      setShowHistory(false);
-                      setHighlightedIndex(-1);
-                    }}
-                    onMouseEnter={() => setHighlightedIndex(index)}
-                    className={`p-4 cursor-pointer border-b border-gray-100 transition-colors flex items-center gap-3 ${
-                      index === highlightedIndex ? 'bg-teal-100' : 'hover:bg-teal-50'
-                    }`}
-                  >
-                    <StockLogo symbol={item.symbol} size={28} />
-                    <div className="flex-1">
-                      <div className="font-bold text-gray-900">{item.symbol}</div>
-                      <div className="text-sm text-gray-600">{item.name}</div>
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {new Date(item.timestamp).toLocaleDateString()}
-                    </div>
+              )}
+
+              {/* Search History Dropdown */}
+              {showHistory && !showResults && searchHistory.length > 0 && (
+                <div className="absolute z-10 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-96 overflow-y-auto">
+                  <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent</span>
+                    <button
+                      onClick={clearHistory}
+                      className="text-xs text-red-500 hover:text-red-600 font-medium"
+                    >
+                      Clear
+                    </button>
                   </div>
-                ))}
+                  {searchHistory.map((item, index) => (
+                    <div
+                      key={item.symbol}
+                      onClick={() => {
+                        setInfoModalSymbol(item.symbol);
+                        setShowHistory(false);
+                        setHighlightedIndex(-1);
+                      }}
+                      onMouseEnter={() => setHighlightedIndex(index)}
+                      className={`p-3 cursor-pointer border-b border-gray-50 transition-colors flex items-center gap-3 ${
+                        index === highlightedIndex ? 'bg-gray-50' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <StockLogo symbol={item.symbol} size={28} />
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-900">{item.symbol}</div>
+                        <div className="text-sm text-gray-500">{item.name}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Top Movers */}
+            <div className="mb-6">
+              <TopMovers onSelectStock={handleSelectStockFromAnalysis} />
+            </div>
+
+            {/* Charts Section */}
+            {loading && (
+              <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+                <p className="text-gray-500 text-center text-sm">
+                  Loading charts for {selectedSymbols.length} stocks...
+                </p>
               </div>
             )}
-          </div>
 
-          {/* Selected Stocks Pills */}
-          <div className="flex flex-wrap gap-2">
-            {selectedSymbols.map(symbol => {
-              const stockInfo = allStocks.find(s => s.symbol === symbol);
-              return (
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl mb-6 text-sm">
+                <strong>Error:</strong> {error}
+              </div>
+            )}
+
+            {selectedSymbols.length === 0 && !loading && (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 mb-6 text-center">
+                <p className="text-gray-500">Select a stock from the watchlist or search to view charts</p>
+              </div>
+            )}
+
+            <div className="space-y-6 mb-8">
+              {selectedSymbols.map(symbol => (
                 <div
                   key={symbol}
-                  className="flex items-center gap-2 px-4 py-2 bg-teal-100 text-teal-900 rounded-full font-medium"
+                  ref={el => { chartCardRefs.current[symbol] = el; }}
+                  className={`bg-white rounded-xl border border-gray-200 p-5 transition-all duration-300 ${
+                    highlightedStock === symbol ? 'ring-2 ring-rh-teal-500 shadow-lg' : ''
+                  }`}
                 >
-                  <button
-                    onClick={() => setInfoModalSymbol(symbol)}
-                    className="flex items-center gap-2 hover:text-teal-600 transition-colors cursor-pointer"
-                  >
-                    <StockLogo symbol={symbol} size={20} />
-                    <span className="font-semibold">{symbol}</span>
-                    {stockInfo && (
-                      <span className="text-xs text-teal-700">({stockInfo.name.substring(0, 20)}...)</span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => toggleStock(symbol)}
-                    className="ml-1 hover:bg-teal-200 rounded-full p-1 transition-colors"
-                    title="Remove from charts"
-                  >
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path
-                        fillRule="evenodd"
-                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
+                  {/* Time Range Selector */}
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex gap-1">
+                      {timeRanges.map(range => (
+                        <button
+                          key={range.label}
+                          onClick={() => setTimeRangeForChart(symbol, range.label)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${chartTimeRanges[symbol] === range.label
+                              ? 'bg-gray-900 text-white'
+                              : 'text-gray-500 hover:bg-gray-100'
+                            }`}
+                        >
+                          {range.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => toggleStock(symbol)}
+                      className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                      title="Remove chart"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <svg
+                    ref={el => { svgRefs.current[symbol] = el; }}
+                    className="w-full"
+                    style={{ height: '400px' }}
+                  ></svg>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {loading && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-            <p className="text-blue-900 text-center">
-              Loading stock data for {selectedSymbols.length} stocks...
-            </p>
-          </div>
-        )}
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-900 p-4 rounded-lg mb-6">
-            <strong>Errors:</strong>
-            <pre className="mt-2 text-sm whitespace-pre-wrap">{error}</pre>
-          </div>
-        )}
-
-        <PerformanceAnalysis onSelectStock={handleSelectStockFromAnalysis} />
-
-        {selectedSymbols.length === 0 && !loading && (
-          <div className="bg-yellow-50 border border-yellow-400 rounded-lg p-6 mb-6 text-center">
-            <p className="text-yellow-900">
-              Please select at least one stock to view charts
-            </p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-8">
-          {selectedSymbols.map(symbol => (
-            <div
-              key={symbol}
-              ref={el => { chartCardRefs.current[symbol] = el; }}
-              className={`bg-white rounded-lg shadow-md p-6 transition-all duration-300 ${
-                highlightedStock === symbol ? 'ring-4 ring-rh-teal-500 shadow-xl' : ''
-              }`}
-            >
-              {/* Time Range Selector */}
-              <div className="flex justify-center gap-2 mb-4 flex-wrap">
-                {timeRanges.map(range => (
-                  <button
-                    key={range.label}
-                    onClick={() => setTimeRangeForChart(symbol, range.label)}
-                    className={`px-5 py-2 rounded-md text-sm font-medium transition-all ${chartTimeRanges[symbol] === range.label
-                        ? 'bg-rh-teal-500 text-white'
-                        : 'bg-white text-gray-900 border border-gray-300 hover:border-gray-400'
-                      }`}
-                  >
-                    {range.label}
-                  </button>
-                ))}
-              </div>
-
-              <svg
-                ref={el => { svgRefs.current[symbol] = el; }}
-                className="w-full"
-                style={{ height: '500px' }}
-              ></svg>
+              ))}
             </div>
-          ))}
+
+            {/* News Feed */}
+            {selectedSymbols.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+                <NewsFeed symbols={selectedSymbols} onSelectStock={handleSelectStockFromAnalysis} />
+              </div>
+            )}
+
+            {/* Performance Analysis */}
+            <div className="mb-8">
+              <PerformanceAnalysis onSelectStock={handleSelectStockFromAnalysis} />
+            </div>
+          </div>
         </div>
 
-        {/* Stock Info Modal */}
-        {infoModalSymbol && (
-          <StockInfoModal
-            symbol={infoModalSymbol}
-            isOpen={true}
-            onClose={() => setInfoModalSymbol(null)}
-            onAddToCharts={(symbol) => {
-              addStockFromSearch(symbol);
-              setInfoModalSymbol(null);
-            }}
-            availableStocks={allStocks}
+        {/* Right Sidebar - Watchlist */}
+        <div className="hidden lg:block">
+          <WatchlistSidebar
+            symbols={selectedSymbols}
+            onSelectStock={handleWatchlistSelect}
+            onRemoveStock={toggleStock}
           />
-        )}
+        </div>
       </div>
+
+      {/* Stock Info Modal */}
+      {infoModalSymbol && (
+        <StockInfoModal
+          symbol={infoModalSymbol}
+          isOpen={true}
+          onClose={() => setInfoModalSymbol(null)}
+          onAddToCharts={(symbol) => {
+            addStockFromSearch(symbol);
+            setInfoModalSymbol(null);
+          }}
+          availableStocks={allStocks}
+        />
+      )}
     </div>
   );
 }
