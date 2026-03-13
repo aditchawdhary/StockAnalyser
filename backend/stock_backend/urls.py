@@ -21,6 +21,7 @@ from .views import social_login
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('stocks.urls')),
+    path('api/rag/', include('rag.urls')),
     path('auth/', include('dj_rest_auth.urls')),
     path('auth/registration/', include('dj_rest_auth.registration.urls')),
     path('auth/social/login/', social_login, name='social_login'),  # Custom OAuth token exchange
