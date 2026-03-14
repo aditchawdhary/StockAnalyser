@@ -82,10 +82,6 @@ const StockInfoModal: React.FC<StockInfoModalProps> = ({ symbol, isOpen, onClose
         intraday: intradayData
       });
 
-      // Add to search history when data is successfully loaded
-      if (overviewData?.name) {
-        addToHistory(currentSymbol, overviewData.name);
-      }
     } catch (error) {
       console.error('Failed to fetch stock info:', error);
     } finally {
