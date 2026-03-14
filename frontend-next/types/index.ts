@@ -146,7 +146,7 @@ declare module 'next-auth' {
 }
 
 // Stock Overview Types
-export interface StockOverviewResponseStockOverview {
+export interface StockOverview {
   Symbol: string;
   AssetType: string;
   Name: string;
