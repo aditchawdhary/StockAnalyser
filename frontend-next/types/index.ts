@@ -146,7 +146,7 @@ declare module 'next-auth' {
 }
 
 // Stock Overview Types
-export interface StockOverview {
+export interface StockOverviewResponseStockOverview {
   Symbol: string;
   AssetType: string;
   Name: string;
@@ -237,4 +237,13 @@ export interface StockInfoModalProps {
   onClose: () => void;
   onAddToCharts: (symbol: string) => void;
   availableStocks?: Stock[];
+}
+
+// Search Results
+export interface SearchResult {
+  '1. symbol': string;
+  '2. name': string;
+  '3. type': string;
+  '4. region': string;
+  '8. currency': string;
 }
